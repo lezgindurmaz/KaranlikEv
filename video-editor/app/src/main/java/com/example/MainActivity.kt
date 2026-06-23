@@ -74,6 +74,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Alignment
@@ -123,70 +125,80 @@ fun VideoEditorApp() {
     val context = LocalContext.current
 
     // File State
-    var videoUri by remember { mutableStateOf<Uri?>(null) }
-    var videoName by remember { mutableStateOf("") }
-    var videoDurationMs by remember { mutableLongStateOf(0L) }
+    var videoUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var videoName by rememberSaveable { mutableStateOf("") }
+    var videoDurationMs by rememberSaveable { mutableLongStateOf(0L) }
 
     // Editor Parameters
-    var startTrimMs by remember { mutableLongStateOf(0L) }
-    var endTrimMs by remember { mutableLongStateOf(0L) }
-    var muteOriginalAudio by remember { mutableStateOf(false) }
+    var startTrimMs by rememberSaveable { mutableLongStateOf(0L) }
+    var endTrimMs by rememberSaveable { mutableLongStateOf(0L) }
+    var muteOriginalAudio by rememberSaveable { mutableStateOf(false) }
 
     // Second Video states
-    var videoUri2 by remember { mutableStateOf<Uri?>(null) }
-    var videoName2 by remember { mutableStateOf("") }
-    var videoDurationMs2 by remember { mutableLongStateOf(0L) }
-    var startTrimMs2 by remember { mutableLongStateOf(0L) }
-    var endTrimMs2 by remember { mutableLongStateOf(0L) }
-    var enableTransition by remember { mutableStateOf(true) }
-    var currentMediaIndex by remember { mutableStateOf(0) }
-    var currentPlaybackPositionMs by remember { mutableLongStateOf(0L) }
+    var videoUri2 by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var videoName2 by rememberSaveable { mutableStateOf("") }
+    var videoDurationMs2 by rememberSaveable { mutableLongStateOf(0L) }
+    var startTrimMs2 by rememberSaveable { mutableLongStateOf(0L) }
+    var endTrimMs2 by rememberSaveable { mutableLongStateOf(0L) }
+    var enableTransition by rememberSaveable { mutableStateOf(true) }
+    var currentMediaIndex by rememberSaveable { mutableStateOf(0) }
+    var currentPlaybackPositionMs by rememberSaveable { mutableLongStateOf(0L) }
 
     // Background music track state
-    var audioUri by remember { mutableStateOf<Uri?>(null) }
-    var audioName by remember { mutableStateOf("") }
-    var audioVolume by remember { mutableFloatStateOf(1f) }
-    var audioDurationMs by remember { mutableLongStateOf(0L) }
-    var audioStartTrimMs by remember { mutableLongStateOf(0L) }
-    var audioEndTrimMs by remember { mutableLongStateOf(0L) }
+    var audioUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var audioName by rememberSaveable { mutableStateOf("") }
+    var audioVolume by rememberSaveable { mutableFloatStateOf(1f) }
+    var audioDurationMs by rememberSaveable { mutableLongStateOf(0L) }
+    var audioStartTrimMs by rememberSaveable { mutableLongStateOf(0L) }
+    var audioEndTrimMs by rememberSaveable { mutableLongStateOf(0L) }
 
     // Text Overlays state
-    val textOverlaysList = remember { mutableStateListOf<VideoTextOverlay>() }
-    var newOverlayText by remember { mutableStateOf("") }
-    var newOverlaySize by remember { mutableFloatStateOf(40f) }
-    var newOverlayX by remember { mutableFloatStateOf(0f) }
-    var newOverlayY by remember { mutableFloatStateOf(0f) }
-    var newOverlayStartMs by remember { mutableLongStateOf(0L) }
-    var newOverlayEndMs by remember { mutableLongStateOf(4000L) }
-    var newOverlayRotation by remember { mutableFloatStateOf(0f) }
-    var newOverlayIsBold by remember { mutableStateOf(false) }
-    var newOverlayIsItalic by remember { mutableStateOf(false) }
+    val textOverlaysList = rememberSaveable(
+        saver = listSaver(
+            save = { it.toList() },
+            restore = { mutableStateListOf<VideoTextOverlay>().apply { addAll(it) } }
+        )
+    ) { mutableStateListOf<VideoTextOverlay>() }
+    var newOverlayText by rememberSaveable { mutableStateOf("") }
+    var newOverlaySize by rememberSaveable { mutableFloatStateOf(40f) }
+    var newOverlayX by rememberSaveable { mutableFloatStateOf(0f) }
+    var newOverlayY by rememberSaveable { mutableFloatStateOf(0f) }
+    var newOverlayStartMs by rememberSaveable { mutableLongStateOf(0L) }
+    var newOverlayEndMs by rememberSaveable { mutableLongStateOf(4000L) }
+    var newOverlayRotation by rememberSaveable { mutableFloatStateOf(0f) }
+    var newOverlayIsBold by rememberSaveable { mutableStateOf(false) }
+    var newOverlayIsItalic by rememberSaveable { mutableStateOf(false) }
 
     // Subtitle states
-    val srtSubtitlesList = remember { mutableStateListOf<SubtitleItem>() }
-    var srtContent by remember { mutableStateOf("") }
-    var srtFileName by remember { mutableStateOf("") }
+    val srtSubtitlesList = rememberSaveable(
+        saver = listSaver(
+            save = { it.toList() },
+            restore = { mutableStateListOf<SubtitleItem>().apply { addAll(it) } }
+        )
+    ) { mutableStateListOf<SubtitleItem>() }
+    var srtContent by rememberSaveable { mutableStateOf("") }
+    var srtFileName by rememberSaveable { mutableStateOf("") }
 
     // Original Audio Volume Levels & Range states
-    var originalVolume by remember { mutableFloatStateOf(1.0f) }
-    var enableVolumeDucking by remember { mutableStateOf(false) }
-    var volumeRangeStartMs by remember { mutableLongStateOf(0L) }
-    var volumeRangeEndMs by remember { mutableLongStateOf(0L) }
+    var originalVolume by rememberSaveable { mutableFloatStateOf(1.0f) }
+    var enableVolumeDucking by rememberSaveable { mutableStateOf(false) }
+    var volumeRangeStartMs by rememberSaveable { mutableLongStateOf(0L) }
+    var volumeRangeEndMs by rememberSaveable { mutableLongStateOf(0L) }
 
     // Music Duration / Range states
-    var enableMusicRange by remember { mutableStateOf(false) }
-    var musicRangeStartMs by remember { mutableLongStateOf(0L) }
-    var musicRangeEndMs by remember { mutableLongStateOf(0L) }
+    var enableMusicRange by rememberSaveable { mutableStateOf(false) }
+    var musicRangeStartMs by rememberSaveable { mutableLongStateOf(0L) }
+    var musicRangeEndMs by rememberSaveable { mutableLongStateOf(0L) }
 
     // Intro Image states
-    var introImageUri by remember { mutableStateOf<Uri?>(null) }
-    var introImageName by remember { mutableStateOf("") }
-    var introDurationMs by remember { mutableLongStateOf(3000L) }
+    var introImageUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var introImageName by rememberSaveable { mutableStateOf("") }
+    var introDurationMs by rememberSaveable { mutableLongStateOf(3000L) }
 
     // Outro Image states
-    var outroImageUri by remember { mutableStateOf<Uri?>(null) }
-    var outroImageName by remember { mutableStateOf("") }
-    var outroDurationMs by remember { mutableLongStateOf(3000L) }
+    var outroImageUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var outroImageName by rememberSaveable { mutableStateOf("") }
+    var outroDurationMs by rememberSaveable { mutableLongStateOf(3000L) }
 
     // Playback state
     var isPlaying by remember { mutableStateOf(false) }

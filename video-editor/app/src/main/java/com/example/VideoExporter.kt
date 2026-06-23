@@ -199,21 +199,21 @@ object VideoExporter {
                     }
 
                     // 3. Render transition fade effect
-                    if (enableTransition && (isJoinMode || hasIntro || hasOutro)) {
+                    if (enableTransition && isJoinMode) {
                         val fadeDurationMs = 1000L
                         var drawFade = false
                         var fadeAlpha = 0f
 
                         // Fade IN (from black) at start of segment
-                        // We do this if it's NOT the very first segment of the whole composition
-                        if ((!isFirstSegment || hasIntro) && presentationTimeMs <= fadeDurationMs) {
+                        // We ONLY do this for joined videos (segment 2+), NOT for Intro/Outro transitions as per latest request
+                        if (!isFirstSegment && !hasIntro && presentationTimeMs <= fadeDurationMs) {
                             val progress = presentationTimeMs.toFloat() / fadeDurationMs.toFloat()
                             fadeAlpha = 1f - progress.coerceIn(0f, 1f)
                             drawFade = true
                         }
                         // Fade OUT (to black) at end of segment
-                        // We do this if it's NOT the very last segment of the whole composition
-                        else if ((!isLastSegment || hasOutro) && presentationTimeMs >= (durationMs - fadeDurationMs)) {
+                        // We ONLY do this for joined videos (segment 1), NOT for Intro/Outro transitions as per latest request
+                        else if (!isLastSegment && !hasOutro && presentationTimeMs >= (durationMs - fadeDurationMs)) {
                             val fadeStart = durationMs - fadeDurationMs
                             val progress = (presentationTimeMs - fadeStart).toFloat() / fadeDurationMs.toFloat()
                             fadeAlpha = progress.coerceIn(0f, 1f)
@@ -310,8 +310,8 @@ object VideoExporter {
                             enableTransition = enableTransition,
                             textOverlays = emptyList(),
                             subtitles = emptyList(),
-                            isJoinMode = true,
-                            hasOutro = true
+                            isJoinMode = false,
+                            hasOutro = false
                         )
                         val introEditedItem = EditedMediaItem.Builder(introMediaItem)
                             .setDurationUs(introDurationMs * 1000L)
@@ -403,8 +403,8 @@ object VideoExporter {
                         textOverlays = emptyList(),
                         subtitles = emptyList(),
                         isJoinMode = true,
-                        hasIntro = true,
-                        hasOutro = outroImageUri != null
+                        hasIntro = false,
+                        hasOutro = false
                     )
 
                     val videoClippingConfig2 = MediaItem.ClippingConfiguration.Builder()
@@ -479,8 +479,8 @@ object VideoExporter {
                         enableTransition = enableTransition,
                         textOverlays = emptyList(),
                         subtitles = emptyList(),
-                        isJoinMode = true,
-                        hasIntro = true
+                        isJoinMode = false,
+                        hasIntro = false
                     )
 
                     val outroDurationUs = outroDurationMs * 1000L

@@ -1,5 +1,7 @@
 package com.example
 
+import java.io.Serializable
+
 data class VideoTextOverlay(
     val text: String,
     val size: Float, // text size (e.g., 20f to 100f)
@@ -10,10 +12,10 @@ data class VideoTextOverlay(
     val rotation: Float = 0f,
     val isBold: Boolean = false,
     val isItalic: Boolean = false
-)
+) : Serializable
 
 data class SubtitleItem(
     val startMs: Long,
     val endMs: Long,
     val text: String
-)
+) : Serializable
