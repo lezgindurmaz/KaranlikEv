@@ -47,6 +47,8 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Filter
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -178,6 +180,29 @@ fun VideoEditorApp() {
     ) { mutableStateListOf<SubtitleItem>() }
     var srtContent by rememberSaveable { mutableStateOf("") }
     var srtFileName by rememberSaveable { mutableStateOf("") }
+
+    // Effects & Filters state
+    val appliedEffects = rememberSaveable(
+        saver = listSaver(
+            save = { it.toList() },
+            restore = { mutableStateListOf<EffectItem>().apply { addAll(it) } }
+        )
+    ) { mutableStateListOf<EffectItem>() }
+
+    val appliedFilters = rememberSaveable(
+        saver = listSaver(
+            save = { it.toList() },
+            restore = { mutableStateListOf<FilterItem>().apply { addAll(it) } }
+        )
+    ) { mutableStateListOf<FilterItem>() }
+
+    var selectedEffectType by rememberSaveable { mutableStateOf(EffectType.ZOOM_IN) }
+    var effectStartMs by rememberSaveable { mutableLongStateOf(0L) }
+    var effectEndMs by rememberSaveable { mutableLongStateOf(2000L) }
+
+    var selectedFilterType by rememberSaveable { mutableStateOf(FilterType.GRAYSCALE) }
+    var filterStartMs by rememberSaveable { mutableLongStateOf(0L) }
+    var filterEndMs by rememberSaveable { mutableLongStateOf(2000L) }
 
     // Original Audio Volume Levels & Range states
     var originalVolume by rememberSaveable { mutableFloatStateOf(1.0f) }
@@ -2013,6 +2038,181 @@ fun VideoEditorApp() {
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 5. Efekt Ekleme Card
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDarkBlue)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "Efektler",
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Vidyoya Efekt Ekle",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextLight
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Effect Selection
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                EffectType.values().forEach { type ->
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (selectedEffectType == type) NeonCyan else Color.DarkGray)
+                                            .clickable { selectedEffectType = type }
+                                            .padding(vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(type.name.replace("_", " "), fontSize = 10.sp, color = if (selectedEffectType == type) SpaceObsidian else Color.White)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text("Aralık: ${Utils.formatTime(effectStartMs)} - ${Utils.formatTime(effectEndMs)}", color = TextLight, fontSize = 12.sp)
+                            Slider(
+                                value = effectStartMs.toFloat(),
+                                onValueChange = { effectStartMs = it.toLong().coerceAtMost(effectEndMs - 500L) },
+                                valueRange = 0f..videoDurationMs.toFloat(),
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan)
+                            )
+                            Slider(
+                                value = effectEndMs.toFloat(),
+                                onValueChange = { effectEndMs = it.toLong().coerceAtLeast(effectStartMs + 500L) },
+                                valueRange = 0f..videoDurationMs.toFloat(),
+                                colors = SliderDefaults.colors(thumbColor = HotPink)
+                            )
+
+                            Button(
+                                onClick = {
+                                    appliedEffects.add(EffectItem(selectedEffectType, effectStartMs, effectEndMs))
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
+                            ) {
+                                Text("Efekti Ekle", color = SpaceObsidian)
+                            }
+
+                            appliedEffects.forEachIndexed { index, item ->
+                                Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("${item.type.name} (${Utils.formatTime(item.startMs)}-${Utils.formatTime(item.endMs)})", color = TextMuted, fontSize = 11.sp)
+                                    Icon(Icons.Default.Delete, "", tint = HotPink, modifier = Modifier.size(16.dp).clickable { appliedEffects.removeAt(index) })
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 6. Filtre Ekleme Card
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDarkBlue)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Filter,
+                                    contentDescription = "Filtreler",
+                                    tint = DeepViolet,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Renk Filtreleri",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextLight
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterType.values().take(3).forEach { type ->
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (selectedFilterType == type) DeepViolet else Color.DarkGray)
+                                            .clickable { selectedFilterType = type }
+                                            .padding(vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(type.name, fontSize = 10.sp, color = Color.White)
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterType.values().drop(3).forEach { type ->
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (selectedFilterType == type) DeepViolet else Color.DarkGray)
+                                            .clickable { selectedFilterType = type }
+                                            .padding(vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(type.name, fontSize = 10.sp, color = Color.White)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text("Aralık: ${Utils.formatTime(filterStartMs)} - ${Utils.formatTime(filterEndMs)}", color = TextLight, fontSize = 12.sp)
+                            Slider(
+                                value = filterStartMs.toFloat(),
+                                onValueChange = { filterStartMs = it.toLong().coerceAtMost(filterEndMs - 500L) },
+                                valueRange = 0f..videoDurationMs.toFloat(),
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan)
+                            )
+                            Slider(
+                                value = filterEndMs.toFloat(),
+                                onValueChange = { filterEndMs = it.toLong().coerceAtLeast(filterStartMs + 500L) },
+                                valueRange = 0f..videoDurationMs.toFloat(),
+                                colors = SliderDefaults.colors(thumbColor = HotPink)
+                            )
+
+                            Button(
+                                onClick = {
+                                    appliedFilters.add(FilterItem(selectedFilterType, filterStartMs, filterEndMs))
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = DeepViolet)
+                            ) {
+                                Text("Filtreyi Ekle", color = Color.White)
+                            }
+
+                            appliedFilters.forEachIndexed { index, item ->
+                                Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("${item.type.name} (${Utils.formatTime(item.startMs)}-${Utils.formatTime(item.endMs)})", color = TextMuted, fontSize = 11.sp)
+                                    Icon(Icons.Default.Delete, "", tint = HotPink, modifier = Modifier.size(16.dp).clickable { appliedFilters.removeAt(index) })
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(24.dp))
 
                     // 3. Export Main CTA Button
@@ -2047,6 +2247,8 @@ fun VideoEditorApp() {
                                 introDurationMs = if (introImageUri != null) introDurationMs else 0L,
                                 outroImageUri = outroImageUri,
                                 outroDurationMs = if (outroImageUri != null) outroDurationMs else 0L,
+                                effects = appliedEffects.toList(),
+                                filters = appliedFilters.toList(),
                                 onProgress = { progress ->
                                     exportProgress = progress
                                 },

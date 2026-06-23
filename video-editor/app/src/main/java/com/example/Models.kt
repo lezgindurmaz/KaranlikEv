@@ -19,3 +19,23 @@ data class SubtitleItem(
     val endMs: Long,
     val text: String
 ) : Serializable
+
+enum class EffectType {
+    ZOOM_IN, ZOOM_OUT, SLIDE_LEFT, SLIDE_RIGHT, FADE_IN, FADE_OUT
+}
+
+data class EffectItem(
+    val type: EffectType,
+    val startMs: Long,
+    val endMs: Long
+) : Serializable
+
+enum class FilterType {
+    GRAYSCALE, SEPIA, CYBERPUNK, VINTAGE, COOL, WARM
+}
+
+data class FilterItem(
+    val type: FilterType,
+    val startMs: Long,
+    val endMs: Long
+) : Serializable

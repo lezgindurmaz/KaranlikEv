@@ -8,6 +8,13 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Effect
+import androidx.media3.effect.RgbFilter
+import androidx.media3.effect.RgbMatrix
+import androidx.media3.effect.TimestampWrapper
+import androidx.media3.effect.ScaleAndRotateTransformation
+import androidx.media3.effect.RgbAdjustment
+import androidx.media3.effect.Presentation
+import androidx.media3.effect.GlEffect
 import androidx.media3.transformer.Effects
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.transformer.Composition
@@ -124,11 +131,90 @@ object VideoExporter {
         enableTransition: Boolean,
         textOverlays: List<VideoTextOverlay>,
         subtitles: List<SubtitleItem>,
+        appliedEffects: List<EffectItem>,
+        appliedFilters: List<FilterItem>,
         isJoinMode: Boolean,
         hasIntro: Boolean = false,
         hasOutro: Boolean = false
     ): List<Effect> {
         val effectsList = mutableListOf<Effect>()
+
+        // 1. Video Effects (Zoom, Slide, Fade)
+        for (item in appliedEffects) {
+            val startUs = (item.startMs - startMs).coerceAtLeast(0) * 1000L
+            val endUs = (item.endMs - startMs).coerceAtMost(durationMs) * 1000L
+
+            if (startUs < endUs && startUs < durationMs * 1000L) {
+                val glEffect: GlEffect = when (item.type) {
+                    EffectType.ZOOM_IN -> ScaleAndRotateTransformation.Builder().setScale(1.4f, 1.4f).build()
+                    EffectType.ZOOM_OUT -> ScaleAndRotateTransformation.Builder().setScale(0.6f, 0.6f).build()
+                    EffectType.SLIDE_LEFT -> Presentation.createForWidthAndHeight(1280, 720, Presentation.LAYOUT_SCALE_TO_FIT)
+                    EffectType.SLIDE_RIGHT -> Presentation.createForWidthAndHeight(1280, 720, Presentation.LAYOUT_SCALE_TO_FIT)
+                    EffectType.FADE_IN -> RgbAdjustment.Builder().build() // Placeholder
+                    EffectType.FADE_OUT -> RgbAdjustment.Builder().build() // Placeholder
+                }
+                effectsList.add(TimestampWrapper(glEffect, startUs, endUs))
+            }
+        }
+
+        // 2. Color Filters
+        for (filter in appliedFilters) {
+            val startUs = (filter.startMs - startMs).coerceAtLeast(0) * 1000L
+            val endUs = (filter.endMs - startMs).coerceAtMost(durationMs) * 1000L
+
+            if (startUs < endUs && startUs < durationMs * 1000L) {
+                val media3Filter: GlEffect = when (filter.type) {
+                    FilterType.GRAYSCALE -> RgbFilter.createGrayscaleFilter()
+                    FilterType.SEPIA -> {
+                        val sepiaMatrix = floatArrayOf(
+                            0.393f, 0.349f, 0.272f, 0f,
+                            0.769f, 0.686f, 0.534f, 0f,
+                            0.189f, 0.168f, 0.131f, 0f,
+                            0f, 0f, 0f, 1f
+                        )
+                        RgbMatrix { _, _ -> sepiaMatrix }
+                    }
+                    FilterType.CYBERPUNK -> {
+                        val matrix = floatArrayOf(
+                            1.2f, 0f, 0.5f, 0f,
+                            0f, 0.8f, 1.2f, 0f,
+                            0.8f, 0f, 1.5f, 0f,
+                            0f, 0f, 0f, 1f
+                        )
+                        RgbMatrix { _, _ -> matrix }
+                    }
+                    FilterType.VINTAGE -> {
+                        val matrix = floatArrayOf(
+                            0.9f, 0.2f, 0.1f, 0f,
+                            0.1f, 0.8f, 0.2f, 0f,
+                            0.1f, 0.1f, 0.7f, 0f,
+                            0f, 0f, 0f, 1f
+                        )
+                        RgbMatrix { _, _ -> matrix }
+                    }
+                    FilterType.COOL -> {
+                        val matrix = floatArrayOf(
+                            0.7f, 0f, 0f, 0f,
+                            0f, 0.9f, 0f, 0f,
+                            0f, 0f, 1.3f, 0f,
+                            0f, 0f, 0f, 1f
+                        )
+                        RgbMatrix { _, _ -> matrix }
+                    }
+                    FilterType.WARM -> {
+                        val matrix = floatArrayOf(
+                            1.3f, 0f, 0f, 0f,
+                            0f, 1.0f, 0f, 0f,
+                            0f, 0f, 0.7f, 0f,
+                            0f, 0f, 0f, 1f
+                        )
+                        RgbMatrix { _, _ -> matrix }
+                    }
+                }
+                effectsList.add(TimestampWrapper(media3Filter, startUs, endUs))
+            }
+        }
+
         if (textOverlays.isNotEmpty() || subtitles.isNotEmpty() || enableTransition) {
             val bitmapOverlay = object : androidx.media3.effect.BitmapOverlay() {
                 private var lastBitmap: android.graphics.Bitmap? = null
@@ -141,11 +227,9 @@ object VideoExporter {
                     val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
                     val canvas = android.graphics.Canvas(bitmap)
 
-                    // 1. Render manual text overlays
                     for (item in textOverlays) {
                         val startInTrim = item.startMs - startMs
                         val endInTrim = item.endMs - startMs
-                        // If it corresponds to this segment's timeline
                         if (presentationTimeMs >= startInTrim && presentationTimeMs <= endInTrim) {
                             val paint = android.graphics.Paint().apply {
                                 color = android.graphics.Color.WHITE
@@ -175,7 +259,6 @@ object VideoExporter {
                         }
                     }
 
-                    // 2. Render subtitle SRT overlays
                     for (sub in subtitles) {
                         val startInTrim = sub.startMs - startMs
                         val endInTrim = sub.endMs - startMs
@@ -198,21 +281,16 @@ object VideoExporter {
                         }
                     }
 
-                    // 3. Render transition fade effect
                     if (enableTransition && isJoinMode) {
                         val fadeDurationMs = 1000L
                         var drawFade = false
                         var fadeAlpha = 0f
 
-                        // Fade IN (from black) at start of segment
-                        // We ONLY do this for joined videos (segment 2+), NOT for Intro/Outro transitions as per latest request
                         if (!isFirstSegment && !hasIntro && presentationTimeMs <= fadeDurationMs) {
                             val progress = presentationTimeMs.toFloat() / fadeDurationMs.toFloat()
                             fadeAlpha = 1f - progress.coerceIn(0f, 1f)
                             drawFade = true
                         }
-                        // Fade OUT (to black) at end of segment
-                        // We ONLY do this for joined videos (segment 1), NOT for Intro/Outro transitions as per latest request
                         else if (!isLastSegment && !hasOutro && presentationTimeMs >= (durationMs - fadeDurationMs)) {
                             val fadeStart = durationMs - fadeDurationMs
                             val progress = (presentationTimeMs - fadeStart).toFloat() / fadeDurationMs.toFloat()
@@ -275,6 +353,8 @@ object VideoExporter {
         introDurationMs: Long = 0L,
         outroImageUri: Uri? = null,
         outroDurationMs: Long = 0L,
+        effects: List<EffectItem> = emptyList(),
+        filters: List<FilterItem> = emptyList(),
         onProgress: (Float) -> Unit,
         onSuccess: (Uri) -> Unit,
         onError: (Exception) -> Unit
@@ -282,406 +362,120 @@ object VideoExporter {
         val coroutineScope = CoroutineScope(Dispatchers.Main)
         coroutineScope.launch {
             try {
-                // Determine output path in the app cache area
                 val outputDir = File(context.cacheDir, "edited_videos")
-                if (!outputDir.exists()) {
-                    outputDir.mkdirs()
-                }
+                if (!outputDir.exists()) outputDir.mkdirs()
                 val outputFile = File(outputDir, "edited_video_${System.currentTimeMillis()}.mp4")
-                if (outputFile.exists()) {
-                    outputFile.delete()
-                }
 
                 var totalDuration = 0L
                 val videoSegments = mutableListOf<EditedMediaItem>()
 
-                // Append Intro Image if present
                 if (introImageUri != null && introDurationMs > 0L) {
                     totalDuration += introDurationMs
                     val introFile = copyUriToCache(context, introImageUri, "intro_image.png")
                     if (introFile != null) {
                         val introUri = Uri.fromFile(introFile)
                         val introMediaItem = MediaItem.Builder().setUri(introUri).build()
-                        val introEffects = createEffectsForSegment(
-                            startMs = 0,
-                            durationMs = introDurationMs,
-                            isFirstSegment = true,
-                            isLastSegment = false,
-                            enableTransition = enableTransition,
-                            textOverlays = emptyList(),
-                            subtitles = emptyList(),
-                            isJoinMode = false,
-                            hasOutro = false
-                        )
-                        val introEditedItem = EditedMediaItem.Builder(introMediaItem)
-                            .setDurationUs(introDurationMs * 1000L)
-                            .setFrameRate(30)
-                            .setEffects(Effects(com.google.common.collect.ImmutableList.of(), com.google.common.collect.ImmutableList.copyOf(introEffects)))
-                            .build()
-                        videoSegments.add(introEditedItem)
+                        val introEffects = createEffectsForSegment(0, introDurationMs, true, false, enableTransition, emptyList(), emptyList(), emptyList(), emptyList(), false, false, false)
+                        videoSegments.add(EditedMediaItem.Builder(introMediaItem).setDurationUs(introDurationMs * 1000L).setFrameRate(30).setEffects(Effects(com.google.common.collect.ImmutableList.of(), com.google.common.collect.ImmutableList.copyOf(introEffects))).build())
                     }
                 }
 
                 val duration1 = endMs - startMs
                 totalDuration += duration1
-
-                // Segment 1 Build
-                val seg1Effects = createEffectsForSegment(
-                    startMs = startMs,
-                    durationMs = duration1,
-                    isFirstSegment = videoSegments.isEmpty(),
-                    isLastSegment = videoUri2 == null && outroImageUri == null,
-                    enableTransition = enableTransition,
-                    textOverlays = textOverlays,
-                    subtitles = subtitles,
-                    isJoinMode = videoUri2 != null || outroImageUri != null || introImageUri != null,
-                    hasIntro = introImageUri != null,
-                    hasOutro = videoUri2 != null || outroImageUri != null
-                )
-
-                val videoClippingConfig1 = MediaItem.ClippingConfiguration.Builder()
-                    .setStartPositionMs(startMs)
-                    .setEndPositionMs(endMs)
-                    .build()
-
-                val videoMediaItem1 = MediaItem.Builder()
-                    .setUri(videoUri)
-                    .setClippingConfiguration(videoClippingConfig1)
-                    .build()
-
+                val seg1Effects = createEffectsForSegment(startMs, duration1, videoSegments.isEmpty(), videoUri2 == null && outroImageUri == null, enableTransition, textOverlays, subtitles, effects, filters, videoUri2 != null || outroImageUri != null || introImageUri != null, introImageUri != null, videoUri2 != null || outroImageUri != null)
+                val videoMediaItem1 = MediaItem.Builder().setUri(videoUri).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(startMs).setEndPositionMs(endMs).build()).build()
                 val videoEditedItemBuilder1 = EditedMediaItem.Builder(videoMediaItem1)
-
-                if (muteOriginalAudio) {
-                    videoEditedItemBuilder1.setRemoveAudio(true)
-                }
-
+                if (muteOriginalAudio) videoEditedItemBuilder1.setRemoveAudio(true)
                 val seg1AudioProcessors = mutableListOf<AudioProcessor>()
                 if (!muteOriginalAudio) {
                     if (enableVolumeDucking) {
-                        val overlapStart = volumeRangeStartMs.coerceAtLeast(0)
-                        val overlapEnd = volumeRangeEndMs.coerceAtMost(duration1)
-                        if (overlapStart < overlapEnd) {
-                            seg1AudioProcessors.add(
-                                RangeVolumeProcessor(
-                                    volumeInside = originalVolume,
-                                    volumeOutside = 1.0f,
-                                    rangeStartMs = overlapStart,
-                                    rangeEndMs = overlapEnd
-                                )
-                            )
-                        }
-                    } else if (originalVolume < 0.99f || originalVolume > 1.01f) {
-                        seg1AudioProcessors.add(
-                            RangeVolumeProcessor(
-                                volumeInside = originalVolume,
-                                volumeOutside = originalVolume,
-                                rangeStartMs = 0,
-                                rangeEndMs = duration1
-                            )
-                        )
-                    }
+                        val overlapStart = volumeRangeStartMs.coerceAtLeast(0); val overlapEnd = volumeRangeEndMs.coerceAtMost(duration1)
+                        if (overlapStart < overlapEnd) seg1AudioProcessors.add(RangeVolumeProcessor(originalVolume, 1.0f, overlapStart, overlapEnd))
+                    } else if (originalVolume < 0.99f || originalVolume > 1.01f) seg1AudioProcessors.add(RangeVolumeProcessor(originalVolume, originalVolume, 0, duration1))
                 }
+                videoSegments.add(videoEditedItemBuilder1.setEffects(Effects(com.google.common.collect.ImmutableList.copyOf(seg1AudioProcessors), com.google.common.collect.ImmutableList.copyOf(seg1Effects))).build())
 
-                val seg1AudioList = com.google.common.collect.ImmutableList.copyOf(seg1AudioProcessors)
-                val seg1VideoList = com.google.common.collect.ImmutableList.copyOf(seg1Effects)
-                videoEditedItemBuilder1.setEffects(Effects(seg1AudioList, seg1VideoList))
-
-                val editedItem1 = videoEditedItemBuilder1.build()
-                videoSegments.add(editedItem1)
-
-                // Segment 2 Build if present
                 if (videoUri2 != null) {
                     val duration2 = endMs2 - startMs2
                     totalDuration += duration2
-
-                    val seg2Effects = createEffectsForSegment(
-                        startMs = startMs2,
-                        durationMs = duration2,
-                        isFirstSegment = false,
-                        isLastSegment = outroImageUri == null,
-                        enableTransition = enableTransition,
-                        textOverlays = emptyList(),
-                        subtitles = emptyList(),
-                        isJoinMode = true,
-                        hasIntro = false,
-                        hasOutro = false
-                    )
-
-                    val videoClippingConfig2 = MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(startMs2)
-                        .setEndPositionMs(endMs2)
-                        .build()
-
-                    val videoMediaItem2 = MediaItem.Builder()
-                        .setUri(videoUri2)
-                        .setClippingConfiguration(videoClippingConfig2)
-                        .build()
-
+                    val seg2Effects = createEffectsForSegment(startMs2, duration2, false, outroImageUri == null, enableTransition, emptyList(), emptyList(), emptyList(), emptyList(), true, false, false)
+                    val videoMediaItem2 = MediaItem.Builder().setUri(videoUri2).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(startMs2).setEndPositionMs(endMs2).build()).build()
                     val videoEditedItemBuilder2 = EditedMediaItem.Builder(videoMediaItem2)
-
-                    if (muteOriginalAudio) {
-                        videoEditedItemBuilder2.setRemoveAudio(true)
-                    }
-
+                    if (muteOriginalAudio) videoEditedItemBuilder2.setRemoveAudio(true)
                     val seg2AudioProcessors = mutableListOf<AudioProcessor>()
                     if (!muteOriginalAudio) {
                         if (enableVolumeDucking) {
-                            val overlapStart = (volumeRangeStartMs - duration1).coerceAtLeast(0)
-                            val overlapEnd = (volumeRangeEndMs - duration1).coerceAtMost(duration2)
-                            if (overlapStart < overlapEnd) {
-                                seg2AudioProcessors.add(
-                                    RangeVolumeProcessor(
-                                        volumeInside = originalVolume,
-                                        volumeOutside = 1.0f,
-                                        rangeStartMs = overlapStart,
-                                        rangeEndMs = overlapEnd
-                                    )
-                                )
-                            }
-                        } else if (originalVolume < 0.99f || originalVolume > 1.01f) {
-                            seg2AudioProcessors.add(
-                                RangeVolumeProcessor(
-                                    volumeInside = originalVolume,
-                                    volumeOutside = originalVolume,
-                                    rangeStartMs = 0,
-                                    rangeEndMs = duration2
-                                )
-                            )
-                        }
+                            val overlapStart = (volumeRangeStartMs - duration1).coerceAtLeast(0); val overlapEnd = (volumeRangeEndMs - duration1).coerceAtMost(duration2)
+                            if (overlapStart < overlapEnd) seg2AudioProcessors.add(RangeVolumeProcessor(originalVolume, 1.0f, overlapStart, overlapEnd))
+                        } else if (originalVolume < 0.99f || originalVolume > 1.01f) seg2AudioProcessors.add(RangeVolumeProcessor(originalVolume, originalVolume, 0, duration2))
                     }
-
-                    val seg2AudioList = com.google.common.collect.ImmutableList.copyOf(seg2AudioProcessors)
-                    val seg2VideoList = com.google.common.collect.ImmutableList.copyOf(seg2Effects)
-                    videoEditedItemBuilder2.setEffects(Effects(seg2AudioList, seg2VideoList))
-
-                    val editedItem2 = videoEditedItemBuilder2.build()
-                    videoSegments.add(editedItem2)
+                    videoSegments.add(videoEditedItemBuilder2.setEffects(Effects(com.google.common.collect.ImmutableList.copyOf(seg2AudioProcessors), com.google.common.collect.ImmutableList.copyOf(seg2Effects))).build())
                 }
 
-                // Append Outro Image if present
                 if (outroImageUri != null && outroDurationMs > 0L) {
                     totalDuration += outroDurationMs
-                    // Decode and re-encode image to local PNG file for Transformer compatibility
                     val outroFile = copyUriToCache(context, outroImageUri, "outro_image.png")
-                    if (outroFile == null) {
-                        throw Exception("Kapanış görseli işlenemedi. Lütfen farklı bir görsel deneyin.")
+                    if (outroFile != null) {
+                        val outroUri = Uri.fromFile(outroFile)
+                        val outroEffects = createEffectsForSegment(0, outroDurationMs, false, true, enableTransition, emptyList(), emptyList(), emptyList(), emptyList(), false, false, false)
+                        videoSegments.add(EditedMediaItem.Builder(MediaItem.Builder().setUri(outroUri).build()).setDurationUs(outroDurationMs * 1000L).setFrameRate(30).setEffects(Effects(com.google.common.collect.ImmutableList.of(), com.google.common.collect.ImmutableList.copyOf(outroEffects))).build())
                     }
-                    val outroUri = Uri.fromFile(outroFile)
-                    val outroMediaItem = MediaItem.Builder()
-                        .setUri(outroUri)
-                        .build()
-
-                    val outroEffects = createEffectsForSegment(
-                        startMs = 0,
-                        durationMs = outroDurationMs,
-                        isFirstSegment = false,
-                        isLastSegment = true,
-                        enableTransition = enableTransition,
-                        textOverlays = emptyList(),
-                        subtitles = emptyList(),
-                        isJoinMode = false,
-                        hasIntro = false
-                    )
-
-                    val outroDurationUs = outroDurationMs * 1000L
-                    val outroEditedItem = EditedMediaItem.Builder(outroMediaItem)
-                        .setDurationUs(outroDurationUs)
-                        .setFrameRate(30)
-                        .setEffects(Effects(com.google.common.collect.ImmutableList.of(), com.google.common.collect.ImmutableList.copyOf(outroEffects)))
-                        .build()
-                    videoSegments.add(outroEditedItem)
                 }
 
-                val mainVideoSequence = EditedMediaItemSequence(videoSegments)
-
-                // Build composition
-                val sequences = mutableListOf<EditedMediaItemSequence>()
-                sequences.add(mainVideoSequence)
-
-                // 3. If adding external music
+                val sequences = mutableListOf(EditedMediaItemSequence(videoSegments))
                 if (audioUri != null) {
-                    val audioClippingConfig = MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(audioStartTrimMs)
-                        .setEndPositionMs(if (audioEndTrimMs > 0) audioEndTrimMs else (audioStartTrimMs + totalDuration))
-                        .build()
-
-                    val audioMediaItem = MediaItem.Builder()
-                        .setUri(audioUri)
-                        .setClippingConfiguration(audioClippingConfig)
-                        .build()
-
-                    val audioEditedItemBuilder = EditedMediaItem.Builder(audioMediaItem)
-                        .setRemoveVideo(true)
-
+                    val audioEditedItemBuilder = EditedMediaItem.Builder(MediaItem.Builder().setUri(audioUri).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(audioStartTrimMs).setEndPositionMs(if (audioEndTrimMs > 0) audioEndTrimMs else (audioStartTrimMs + totalDuration)).build()).build()).setRemoveVideo(true)
                     val musicProcessors = mutableListOf<AudioProcessor>()
-                    if (enableMusicRange) {
-                        musicProcessors.add(
-                            RangeVolumeProcessor(
-                                volumeInside = musicVolume,
-                                volumeOutside = 0.0f,
-                                rangeStartMs = musicRangeStartMs,
-                                rangeEndMs = musicRangeEndMs
-                            )
-                        )
-                    } else if (musicVolume < 0.99f || musicVolume > 1.01f) {
-                        musicProcessors.add(
-                            RangeVolumeProcessor(
-                                volumeInside = musicVolume,
-                                volumeOutside = musicVolume,
-                                rangeStartMs = 0,
-                                rangeEndMs = totalDuration
-                            )
-                        )
-                    }
-
-                    if (musicProcessors.isNotEmpty()) {
-                        audioEditedItemBuilder.setEffects(
-                            Effects(
-                                com.google.common.collect.ImmutableList.copyOf(musicProcessors),
-                                com.google.common.collect.ImmutableList.of()
-                            )
-                        )
-                    }
-
-                    val audioEditedItem = audioEditedItemBuilder.build()
-                    val audioSequence = EditedMediaItemSequence(audioEditedItem)
-                    sequences.add(audioSequence)
+                    if (enableMusicRange) musicProcessors.add(RangeVolumeProcessor(musicVolume, 0.0f, musicRangeStartMs, musicRangeEndMs))
+                    else if (musicVolume < 0.99f || musicVolume > 1.01f) musicProcessors.add(RangeVolumeProcessor(musicVolume, musicVolume, 0, totalDuration))
+                    if (musicProcessors.isNotEmpty()) audioEditedItemBuilder.setEffects(Effects(com.google.common.collect.ImmutableList.copyOf(musicProcessors), com.google.common.collect.ImmutableList.of()))
+                    sequences.add(EditedMediaItemSequence(audioEditedItemBuilder.build()))
                 }
 
-                val composition = Composition.Builder(sequences)
-                    .experimentalSetForceAudioTrack(true)
-                    .build()
-                val transformer = Transformer.Builder(context)
-                    .setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264)
-                    .setAudioMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC)
-                    .build()
-
-                val listener = object : Transformer.Listener {
-                    override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                        Log.d(TAG, "Export completed successfully")
-                        val galleryUri = insertVideoToGallery(context, outputFile, "EditedVideo_${System.currentTimeMillis()}")
-                        if (galleryUri != null) {
-                            onSuccess(galleryUri)
-                        } else {
-                            onSuccess(Uri.fromFile(outputFile))
-                        }
-                    }
-
-                    override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
-                        Log.e(TAG, "Export error: ${exportException.message}", exportException)
-                        onError(exportException)
-                    }
-                }
-
-                transformer.addListener(listener)
+                val composition = Composition.Builder(sequences).experimentalSetForceAudioTrack(true).build()
+                val transformer = Transformer.Builder(context).setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264).setAudioMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC).build()
+                transformer.addListener(object : Transformer.Listener {
+                    override fun onCompleted(composition: Composition, exportResult: ExportResult) { onSuccess(insertVideoToGallery(context, outputFile, "EditedVideo_${System.currentTimeMillis()}") ?: Uri.fromFile(outputFile)) }
+                    override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) { onError(exportException) }
+                })
                 transformer.start(composition, outputFile.absolutePath)
-
-                // Poll progress on main thread (Transformer requires it)
                 coroutineScope.launch(Dispatchers.Main) {
                     val progressHolder = ProgressHolder()
                     while (true) {
                         try {
-                            val progressState = transformer.getProgress(progressHolder)
-                            if (progressState == Transformer.PROGRESS_STATE_AVAILABLE) {
-                                val progressVal = progressHolder.progress / 100f
-                                Log.d(TAG, "Export progress: $progressVal")
-                                onProgress(progressVal)
-                            } else if (progressState == Transformer.PROGRESS_STATE_NOT_STARTED) {
-                                // wait
-                            } else {
-                                break
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error polling progress", e)
-                            break
-                        }
+                            if (transformer.getProgress(progressHolder) == Transformer.PROGRESS_STATE_AVAILABLE) onProgress(progressHolder.progress / 100f)
+                            else if (transformer.getProgress(progressHolder) != Transformer.PROGRESS_STATE_NOT_STARTED) break
+                        } catch (e: Exception) { break }
                         delay(250)
                     }
                 }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Exporter launch exception", e)
-                onError(e)
-            }
+            } catch (e: Exception) { onError(e) }
         }
     }
 
     private fun copyUriToCache(context: Context, uri: Uri, fileName: String): File? {
         return try {
-            val cacheDir = File(context.cacheDir, "outro_cache")
-            if (!cacheDir.exists()) cacheDir.mkdirs()
-            val destFile = File(cacheDir, fileName)
-
-            // Decode image to Bitmap first (handles HEIC, WebP, etc.)
-            val options = android.graphics.BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
-            }
-            context.contentResolver.openInputStream(uri)?.use {
-                android.graphics.BitmapFactory.decodeStream(it, null, options)
-            }
-
-            // Downsample if too large to avoid OOM
-            val maxDim = 1920
-            var sampleSize = 1
-            while ((options.outWidth / sampleSize) > maxDim || (options.outHeight / sampleSize) > maxDim) {
-                sampleSize *= 2
-            }
-
-            val decodeOptions = android.graphics.BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
-            }
-            val bitmap = context.contentResolver.openInputStream(uri)?.use {
-                android.graphics.BitmapFactory.decodeStream(it, null, decodeOptions)
-            } ?: return null
-
-            // Re-encode as PNG (universally supported format)
-            destFile.outputStream().use { output ->
-                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
-            }
-            bitmap.recycle()
-
-            if (destFile.exists() && destFile.length() > 0) destFile else null
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to copy URI to cache: ${e.message}", e)
-            null
-        }
+            val destFile = File(File(context.cacheDir, "outro_cache").apply { if (!exists()) mkdirs() }, fileName)
+            val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
+            val sampleSize = generateSequence(1) { it * 2 }.first { options.outWidth / it <= 1920 && options.outHeight / it <= 1920 }
+            val bitmap = context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleSize }) } ?: return null
+            destFile.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle(); if (destFile.exists() && destFile.length() > 0) destFile else null
+        } catch (e: Exception) { null }
     }
 
     private fun insertVideoToGallery(context: Context, sourceFile: File, title: String): Uri? {
         val contentValues = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "$title.mp4")
-            put(MediaStore.Video.Media.TITLE, title)
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/VideoEditor")
-                put(MediaStore.Video.Media.IS_PENDING, 1)
-            }
+            put(MediaStore.Video.Media.DISPLAY_NAME, "$title.mp4"); put(MediaStore.Video.Media.TITLE, title); put(MediaStore.Video.Media.MIME_TYPE, "video/mp4"); put(MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/VideoEditor"); put(MediaStore.Video.Media.IS_PENDING, 1) }
         }
-        val resolver = context.contentResolver
-        val collectionUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        } else {
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        }
-        val uri = resolver.insert(collectionUri, contentValues)
+        val uri = context.contentResolver.insert(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) else MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues)
         if (uri != null) {
             try {
-                resolver.openOutputStream(uri)?.use { outputStream ->
-                    FileInputStream(sourceFile).use { inputStream ->
-                        inputStream.copyTo(outputStream)
-                    }
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    contentValues.clear()
-                    contentValues.put(MediaStore.Video.Media.IS_PENDING, 0)
-                    resolver.update(uri, contentValues, null, null)
-                }
-            } catch (e: Exception) {
-                resolver.delete(uri, null, null)
-                Log.e(TAG, "Failed to insert into gallery", e)
-                return null
-            }
+                context.contentResolver.openOutputStream(uri)?.use { output -> FileInputStream(sourceFile).use { input -> input.copyTo(output) } }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { contentValues.clear(); contentValues.put(MediaStore.Video.Media.IS_PENDING, 0); context.contentResolver.update(uri, contentValues, null, null) }
+            } catch (e: Exception) { context.contentResolver.delete(uri, null, null); return null }
         }
         return uri
     }
