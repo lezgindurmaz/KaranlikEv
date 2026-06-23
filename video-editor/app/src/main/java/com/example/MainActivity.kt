@@ -178,6 +178,11 @@ fun VideoEditorApp() {
     var musicRangeStartMs by remember { mutableLongStateOf(0L) }
     var musicRangeEndMs by remember { mutableLongStateOf(0L) }
 
+    // Intro Image states
+    var introImageUri by remember { mutableStateOf<Uri?>(null) }
+    var introImageName by remember { mutableStateOf("") }
+    var introDurationMs by remember { mutableLongStateOf(3000L) }
+
     // Outro Image states
     var outroImageUri by remember { mutableStateOf<Uri?>(null) }
     var outroImageName by remember { mutableStateOf("") }
@@ -406,6 +411,16 @@ fun VideoEditorApp() {
         }
     }
 
+    val introImagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            introImageUri = uri
+            introImageName = Utils.getFileName(context, uri)
+            Toast.makeText(context, "Giriş görseli başarıyla seçildi!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val outroImagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -551,6 +566,35 @@ fun VideoEditorApp() {
                                                         .align(alignment)
                                                         .padding(12.dp)
                                                         .rotate(item.rotation)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Live Preview of the text being currently edited
+                                    if (newOverlayText.isNotBlank()) {
+                                        val originalTimeMs = currentPlaybackPositionMs + startTrimMs
+                                        if (originalTimeMs >= newOverlayStartMs && originalTimeMs <= newOverlayEndMs) {
+                                            androidx.compose.ui.BiasAlignment(newOverlayX, -newOverlayY).let { alignment ->
+                                                Text(
+                                                    text = newOverlayText,
+                                                    color = Color.White.copy(alpha = 0.7f),
+                                                    fontSize = (newOverlaySize / 3.0f).coerceIn(12f, 32f).sp,
+                                                    style = androidx.compose.ui.text.TextStyle(
+                                                        fontWeight = if (newOverlayIsBold) FontWeight.Bold else FontWeight.Normal,
+                                                        fontStyle = if (newOverlayIsItalic) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                                                        shadow = androidx.compose.ui.graphics.Shadow(
+                                                            color = Color.Black,
+                                                            offset = androidx.compose.ui.geometry.Offset(2f, 2f),
+                                                            blurRadius = 4f
+                                                        )
+                                                    ),
+                                                    modifier = Modifier
+                                                        .align(alignment)
+                                                        .padding(12.dp)
+                                                        .rotate(newOverlayRotation)
+                                                        .border(1.dp, NeonCyan.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                                        .padding(4.dp)
                                                 )
                                             }
                                         }
@@ -1329,6 +1373,124 @@ fun VideoEditorApp() {
 
                     Spacer(modifier = Modifier.height(16.dp))
 
+                    // 2.1 Giriş Görseli (Intro) Card
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDarkBlue)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Image,
+                                    contentDescription = "Giriş",
+                                    tint = DeepViolet,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Giriş Görseli (Intro) Ekle",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextLight
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            if (introImageUri == null) {
+                                Button(
+                                    onClick = { introImagePickerLauncher.launch("image/*") },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DeepViolet),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Image,
+                                        contentDescription = "Görsel Seç"
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Giriş Görseli Seç (Galeriden)",
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            } else {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Image,
+                                                contentDescription = "Görsel",
+                                                tint = NeonCyan,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = introImageName,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextLight,
+                                                maxLines = 1
+                                             )
+                                         }
+
+                                         IconButton(
+                                             onClick = {
+                                                 introImageUri = null
+                                                 introImageName = ""
+                                             }
+                                         ) {
+                                             Icon(
+                                                 imageVector = Icons.Default.Delete,
+                                                 contentDescription = "Görseli Sil",
+                                                 tint = HotPink,
+                                                 modifier = Modifier.size(18.dp)
+                                             )
+                                         }
+                                     }
+
+                                     Spacer(modifier = Modifier.height(12.dp))
+
+                                     Text(
+                                         text = "Giriş Süresi: ${(introDurationMs / 1000)} Saniye",
+                                         fontSize = 12.sp,
+                                         color = TextLight,
+                                         fontWeight = FontWeight.Medium
+                                     )
+                                     Slider(
+                                         value = introDurationMs.toFloat(),
+                                         onValueChange = { introDurationMs = it.toLong() },
+                                         valueRange = 1000f..10000f,
+                                         steps = 8,
+                                         colors = SliderDefaults.colors(
+                                             thumbColor = DeepViolet,
+                                             activeTrackColor = DeepViolet,
+                                             inactiveTrackColor = Color.DarkGray
+                                         )
+                                     )
+                                 }
+                             }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     // 2.2 Kapanış Görseli (Outro) Card
                     Card(
                         modifier = Modifier
@@ -1869,6 +2031,8 @@ fun VideoEditorApp() {
                                 musicRangeStartMs = musicRangeStartMs,
                                 musicRangeEndMs = musicRangeEndMs,
                                 enableMusicRange = enableMusicRange,
+                                introImageUri = introImageUri,
+                                introDurationMs = if (introImageUri != null) introDurationMs else 0L,
                                 outroImageUri = outroImageUri,
                                 outroDurationMs = if (outroImageUri != null) outroDurationMs else 0L,
                                 onProgress = { progress ->

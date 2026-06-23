@@ -124,7 +124,9 @@ object VideoExporter {
         enableTransition: Boolean,
         textOverlays: List<VideoTextOverlay>,
         subtitles: List<SubtitleItem>,
-        isJoinMode: Boolean
+        isJoinMode: Boolean,
+        hasIntro: Boolean = false,
+        hasOutro: Boolean = false
     ): List<Effect> {
         val effectsList = mutableListOf<Effect>()
         if (textOverlays.isNotEmpty() || subtitles.isNotEmpty() || enableTransition) {
@@ -197,18 +199,21 @@ object VideoExporter {
                     }
 
                     // 3. Render transition fade effect
-                    if (enableTransition && isJoinMode) {
+                    if (enableTransition && (isJoinMode || hasIntro || hasOutro)) {
                         val fadeDurationMs = 1000L
                         var drawFade = false
                         var fadeAlpha = 0f
 
-                        if (!isFirstSegment && presentationTimeMs <= fadeDurationMs) {
-                            // First 1 sec of segment 2: Fade In
+                        // Fade IN (from black) at start of segment
+                        // We do this if it's NOT the very first segment of the whole composition
+                        if ((!isFirstSegment || hasIntro) && presentationTimeMs <= fadeDurationMs) {
                             val progress = presentationTimeMs.toFloat() / fadeDurationMs.toFloat()
                             fadeAlpha = 1f - progress.coerceIn(0f, 1f)
                             drawFade = true
-                        } else if (!isLastSegment && presentationTimeMs >= (durationMs - fadeDurationMs)) {
-                            // Last 1 sec of segment 1: Fade Out
+                        }
+                        // Fade OUT (to black) at end of segment
+                        // We do this if it's NOT the very last segment of the whole composition
+                        else if ((!isLastSegment || hasOutro) && presentationTimeMs >= (durationMs - fadeDurationMs)) {
                             val fadeStart = durationMs - fadeDurationMs
                             val progress = (presentationTimeMs - fadeStart).toFloat() / fadeDurationMs.toFloat()
                             fadeAlpha = progress.coerceIn(0f, 1f)
@@ -266,6 +271,8 @@ object VideoExporter {
         musicRangeStartMs: Long = 0L,
         musicRangeEndMs: Long = 0L,
         enableMusicRange: Boolean = false,
+        introImageUri: Uri? = null,
+        introDurationMs: Long = 0L,
         outroImageUri: Uri? = null,
         outroDurationMs: Long = 0L,
         onProgress: (Float) -> Unit,
@@ -285,18 +292,51 @@ object VideoExporter {
                     outputFile.delete()
                 }
 
+                var totalDuration = 0L
+                val videoSegments = mutableListOf<EditedMediaItem>()
+
+                // Append Intro Image if present
+                if (introImageUri != null && introDurationMs > 0L) {
+                    totalDuration += introDurationMs
+                    val introFile = copyUriToCache(context, introImageUri, "intro_image.png")
+                    if (introFile != null) {
+                        val introUri = Uri.fromFile(introFile)
+                        val introMediaItem = MediaItem.Builder().setUri(introUri).build()
+                        val introEffects = createEffectsForSegment(
+                            startMs = 0,
+                            durationMs = introDurationMs,
+                            isFirstSegment = true,
+                            isLastSegment = false,
+                            enableTransition = enableTransition,
+                            textOverlays = emptyList(),
+                            subtitles = emptyList(),
+                            isJoinMode = true,
+                            hasOutro = true
+                        )
+                        val introEditedItem = EditedMediaItem.Builder(introMediaItem)
+                            .setDurationUs(introDurationMs * 1000L)
+                            .setFrameRate(30)
+                            .setEffects(Effects(com.google.common.collect.ImmutableList.of(), com.google.common.collect.ImmutableList.copyOf(introEffects)))
+                            .build()
+                        videoSegments.add(introEditedItem)
+                    }
+                }
+
                 val duration1 = endMs - startMs
+                totalDuration += duration1
 
                 // Segment 1 Build
                 val seg1Effects = createEffectsForSegment(
                     startMs = startMs,
                     durationMs = duration1,
-                    isFirstSegment = true,
+                    isFirstSegment = videoSegments.isEmpty(),
                     isLastSegment = videoUri2 == null && outroImageUri == null,
                     enableTransition = enableTransition,
                     textOverlays = textOverlays,
                     subtitles = subtitles,
-                    isJoinMode = videoUri2 != null || outroImageUri != null
+                    isJoinMode = videoUri2 != null || outroImageUri != null || introImageUri != null,
+                    hasIntro = introImageUri != null,
+                    hasOutro = videoUri2 != null || outroImageUri != null
                 )
 
                 val videoClippingConfig1 = MediaItem.ClippingConfiguration.Builder()
@@ -347,10 +387,7 @@ object VideoExporter {
                 videoEditedItemBuilder1.setEffects(Effects(seg1AudioList, seg1VideoList))
 
                 val editedItem1 = videoEditedItemBuilder1.build()
-                val videoSegments = mutableListOf<EditedMediaItem>()
                 videoSegments.add(editedItem1)
-
-                var totalDuration = duration1
 
                 // Segment 2 Build if present
                 if (videoUri2 != null) {
@@ -365,7 +402,9 @@ object VideoExporter {
                         enableTransition = enableTransition,
                         textOverlays = emptyList(),
                         subtitles = emptyList(),
-                        isJoinMode = true
+                        isJoinMode = true,
+                        hasIntro = true,
+                        hasOutro = outroImageUri != null
                     )
 
                     val videoClippingConfig2 = MediaItem.ClippingConfiguration.Builder()
@@ -431,10 +470,24 @@ object VideoExporter {
                     val outroMediaItem = MediaItem.Builder()
                         .setUri(outroUri)
                         .build()
+
+                    val outroEffects = createEffectsForSegment(
+                        startMs = 0,
+                        durationMs = outroDurationMs,
+                        isFirstSegment = false,
+                        isLastSegment = true,
+                        enableTransition = enableTransition,
+                        textOverlays = emptyList(),
+                        subtitles = emptyList(),
+                        isJoinMode = true,
+                        hasIntro = true
+                    )
+
                     val outroDurationUs = outroDurationMs * 1000L
                     val outroEditedItem = EditedMediaItem.Builder(outroMediaItem)
                         .setDurationUs(outroDurationUs)
                         .setFrameRate(30)
+                        .setEffects(Effects(com.google.common.collect.ImmutableList.of(), com.google.common.collect.ImmutableList.copyOf(outroEffects)))
                         .build()
                     videoSegments.add(outroEditedItem)
                 }
