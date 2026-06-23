@@ -12,9 +12,9 @@ import androidx.media3.effect.RgbFilter
 import androidx.media3.effect.RgbMatrix
 import androidx.media3.effect.TimestampWrapper
 import androidx.media3.effect.ScaleAndRotateTransformation
-import androidx.media3.effect.RgbAdjustment
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.GlEffect
+import androidx.media3.effect.GlMatrixTransformation
 import androidx.media3.transformer.Effects
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.transformer.Composition
@@ -32,6 +32,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import android.opengl.Matrix
 
 class RangeVolumeProcessor(
     private val volumeInside: Float,
@@ -53,38 +54,26 @@ class RangeVolumeProcessor(
         return inputAudioFormat
     }
 
-    override fun isActive(): Boolean {
-        return pendingFormat != AudioProcessor.AudioFormat.NOT_SET
-    }
+    override fun isActive(): Boolean = pendingFormat != AudioProcessor.AudioFormat.NOT_SET
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (!inputBuffer.hasRemaining()) return
-
         val remaining = inputBuffer.remaining()
         if (outputBuffer.capacity() < remaining) {
             outputBuffer = ByteBuffer.allocateDirect(remaining).order(ByteOrder.nativeOrder())
         } else {
             outputBuffer.clear()
         }
-
-        val sampleSize = 2 // 16-bit PCM = 2 bytes
+        val sampleSize = 2
         val sampleRate = activeFormat.sampleRate
         val channelCount = activeFormat.channelCount
-        val bytesPerMillisecond = (sampleRate * channelCount * sampleSize) / 1000.0f
-
-        val startByte = (rangeStartMs * bytesPerMillisecond).toLong()
-        val endByte = (rangeEndMs * bytesPerMillisecond).toLong()
+        val bytesPerMs = (sampleRate * channelCount * sampleSize) / 1000.0f
+        val startByte = (rangeStartMs * bytesPerMs).toLong()
+        val endByte = (rangeEndMs * bytesPerMs).toLong()
 
         while (inputBuffer.hasRemaining()) {
             var sample = inputBuffer.getShort()
-            val currentBytePos = bytesWritten
-
-            val scale = if (currentBytePos in startByte..endByte) {
-                volumeInside
-            } else {
-                volumeOutside
-            }
-
+            val scale = if (bytesWritten in startByte..endByte) volumeInside else volumeOutside
             sample = (sample * scale).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
             outputBuffer.putShort(sample)
             bytesWritten += sampleSize
@@ -98,25 +87,31 @@ class RangeVolumeProcessor(
         return buffer
     }
 
-    override fun queueEndOfStream() {
-        inputEnded = true
-    }
+    override fun queueEndOfStream() { inputEnded = true }
+    override fun isEnded(): Boolean = inputEnded && outputBuffer === AudioProcessor.EMPTY_BUFFER
+    override fun flush() { outputBuffer = AudioProcessor.EMPTY_BUFFER; inputEnded = false; bytesWritten = 0L; activeFormat = pendingFormat }
+    override fun reset() { flush(); activeFormat = AudioProcessor.AudioFormat.NOT_SET; pendingFormat = AudioProcessor.AudioFormat.NOT_SET }
+}
 
-    override fun isEnded(): Boolean {
-        return inputEnded && outputBuffer === AudioProcessor.EMPTY_BUFFER
+class ZoomTransformation(private val zoomIn: Boolean, private val durationUs: Long) : GlMatrixTransformation {
+    override fun getGlMatrixArray(presentationTimeUs: Long): FloatArray {
+        val progress = presentationTimeUs.toFloat() / durationUs.coerceAtLeast(1L).toFloat()
+        val scale = if (zoomIn) 1.0f + (progress * 0.5f) else 1.5f - (progress * 0.5f)
+        val matrix = FloatArray(16)
+        Matrix.setIdentityM(matrix, 0)
+        Matrix.scaleM(matrix, 0, scale, scale, 1.0f)
+        return matrix
     }
+}
 
-    override fun flush() {
-        outputBuffer = AudioProcessor.EMPTY_BUFFER
-        inputEnded = false
-        bytesWritten = 0L
-        activeFormat = pendingFormat
-    }
-
-    override fun reset() {
-        flush()
-        activeFormat = AudioProcessor.AudioFormat.NOT_SET
-        pendingFormat = AudioProcessor.AudioFormat.NOT_SET
+class SlideTransformation(private val slideLeft: Boolean, private val durationUs: Long) : GlMatrixTransformation {
+    override fun getGlMatrixArray(presentationTimeUs: Long): FloatArray {
+        val progress = presentationTimeUs.toFloat() / durationUs.coerceAtLeast(1L).toFloat()
+        val translate = if (slideLeft) progress * 2.0f else progress * -2.0f
+        val matrix = FloatArray(16)
+        Matrix.setIdentityM(matrix, 0)
+        Matrix.translateM(matrix, 0, translate, 0f, 0f)
+        return matrix
     }
 }
 
@@ -139,77 +134,34 @@ object VideoExporter {
     ): List<Effect> {
         val effectsList = mutableListOf<Effect>()
 
-        // 1. Video Effects (Zoom, Slide, Fade)
         for (item in appliedEffects) {
             val startUs = (item.startMs - startMs).coerceAtLeast(0) * 1000L
             val endUs = (item.endMs - startMs).coerceAtMost(durationMs) * 1000L
-
             if (startUs < endUs && startUs < durationMs * 1000L) {
+                val effectDurationUs = endUs - startUs
                 val glEffect: GlEffect = when (item.type) {
-                    EffectType.ZOOM_IN -> ScaleAndRotateTransformation.Builder().setScale(1.4f, 1.4f).build()
-                    EffectType.ZOOM_OUT -> ScaleAndRotateTransformation.Builder().setScale(0.6f, 0.6f).build()
-                    EffectType.SLIDE_LEFT -> Presentation.createForWidthAndHeight(1280, 720, Presentation.LAYOUT_SCALE_TO_FIT)
-                    EffectType.SLIDE_RIGHT -> Presentation.createForWidthAndHeight(1280, 720, Presentation.LAYOUT_SCALE_TO_FIT)
-                    EffectType.FADE_IN -> RgbAdjustment.Builder().build() // Placeholder
-                    EffectType.FADE_OUT -> RgbAdjustment.Builder().build() // Placeholder
+                    EffectType.ZOOM_IN -> ZoomTransformation(true, effectDurationUs)
+                    EffectType.ZOOM_OUT -> ZoomTransformation(false, effectDurationUs)
+                    EffectType.SLIDE_LEFT -> SlideTransformation(true, effectDurationUs)
+                    EffectType.SLIDE_RIGHT -> SlideTransformation(false, effectDurationUs)
+                    EffectType.FADE_IN -> RgbFilter.createGrayscaleFilter()
+                    EffectType.FADE_OUT -> RgbFilter.createGrayscaleFilter()
                 }
                 effectsList.add(TimestampWrapper(glEffect, startUs, endUs))
             }
         }
 
-        // 2. Color Filters
         for (filter in appliedFilters) {
             val startUs = (filter.startMs - startMs).coerceAtLeast(0) * 1000L
             val endUs = (filter.endMs - startMs).coerceAtMost(durationMs) * 1000L
-
             if (startUs < endUs && startUs < durationMs * 1000L) {
                 val media3Filter: GlEffect = when (filter.type) {
                     FilterType.GRAYSCALE -> RgbFilter.createGrayscaleFilter()
-                    FilterType.SEPIA -> {
-                        val sepiaMatrix = floatArrayOf(
-                            0.393f, 0.349f, 0.272f, 0f,
-                            0.769f, 0.686f, 0.534f, 0f,
-                            0.189f, 0.168f, 0.131f, 0f,
-                            0f, 0f, 0f, 1f
-                        )
-                        RgbMatrix { _, _ -> sepiaMatrix }
-                    }
-                    FilterType.CYBERPUNK -> {
-                        val matrix = floatArrayOf(
-                            1.2f, 0f, 0.5f, 0f,
-                            0f, 0.8f, 1.2f, 0f,
-                            0.8f, 0f, 1.5f, 0f,
-                            0f, 0f, 0f, 1f
-                        )
-                        RgbMatrix { _, _ -> matrix }
-                    }
-                    FilterType.VINTAGE -> {
-                        val matrix = floatArrayOf(
-                            0.9f, 0.2f, 0.1f, 0f,
-                            0.1f, 0.8f, 0.2f, 0f,
-                            0.1f, 0.1f, 0.7f, 0f,
-                            0f, 0f, 0f, 1f
-                        )
-                        RgbMatrix { _, _ -> matrix }
-                    }
-                    FilterType.COOL -> {
-                        val matrix = floatArrayOf(
-                            0.7f, 0f, 0f, 0f,
-                            0f, 0.9f, 0f, 0f,
-                            0f, 0f, 1.3f, 0f,
-                            0f, 0f, 0f, 1f
-                        )
-                        RgbMatrix { _, _ -> matrix }
-                    }
-                    FilterType.WARM -> {
-                        val matrix = floatArrayOf(
-                            1.3f, 0f, 0f, 0f,
-                            0f, 1.0f, 0f, 0f,
-                            0f, 0f, 0.7f, 0f,
-                            0f, 0f, 0f, 1f
-                        )
-                        RgbMatrix { _, _ -> matrix }
-                    }
+                    FilterType.SEPIA -> RgbMatrix { _, _ -> floatArrayOf(0.393f, 0.349f, 0.272f, 0f, 0.769f, 0.686f, 0.534f, 0f, 0.189f, 0.168f, 0.131f, 0f, 0f, 0f, 0f, 1f) }
+                    FilterType.CYBERPUNK -> RgbMatrix { _, _ -> floatArrayOf(1.5f, -0.5f, 0.5f, 0f, -0.5f, 1.0f, 1.5f, 0f, 0.5f, 0f, 2.0f, 0f, 0f, 0f, 0f, 1f) }
+                    FilterType.VINTAGE -> RgbMatrix { _, _ -> floatArrayOf(0.9f, 0.2f, 0.1f, 0f, 0.1f, 0.8f, 0.2f, 0f, 0.1f, 0.1f, 0.7f, 0f, 0f, 0f, 0f, 1f) }
+                    FilterType.COOL -> RgbMatrix { _, _ -> floatArrayOf(0.7f, 0f, 0.3f, 0f, 0f, 0.8f, 0.5f, 0f, 0f, 0f, 1.4f, 0f, 0f, 0f, 0f, 1f) }
+                    FilterType.WARM -> RgbMatrix { _, _ -> floatArrayOf(1.4f, 0f, 0f, 0f, 0f, 1.1f, 0f, 0f, 0f, 0f, 0.8f, 0f, 0f, 0f, 0f, 1f) }
                 }
                 effectsList.add(TimestampWrapper(media3Filter, startUs, endUs))
             }
@@ -218,210 +170,101 @@ object VideoExporter {
         if (textOverlays.isNotEmpty() || subtitles.isNotEmpty() || enableTransition) {
             val bitmapOverlay = object : androidx.media3.effect.BitmapOverlay() {
                 private var lastBitmap: android.graphics.Bitmap? = null
-
                 override fun getBitmap(presentationTimeUs: Long): android.graphics.Bitmap {
                     val presentationTimeMs = presentationTimeUs / 1000
-
-                    val width = 1280
-                    val height = 720
+                    val width = 1280; val height = 720
                     val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
                     val canvas = android.graphics.Canvas(bitmap)
-
                     for (item in textOverlays) {
-                        val startInTrim = item.startMs - startMs
-                        val endInTrim = item.endMs - startMs
-                        if (presentationTimeMs >= startInTrim && presentationTimeMs <= endInTrim) {
+                        val startInTrim = item.startMs - startMs; val endInTrim = item.endMs - startMs
+                        if (presentationTimeMs in startInTrim..endInTrim) {
                             val paint = android.graphics.Paint().apply {
-                                color = android.graphics.Color.WHITE
-                                textSize = item.size
-                                isAntiAlias = true
-                                textAlign = android.graphics.Paint.Align.CENTER
+                                color = android.graphics.Color.WHITE; textSize = item.size; isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER
                                 setShadowLayer(6f, 3f, 3f, android.graphics.Color.BLACK)
-                                if (item.isBold && item.isItalic) {
-                                    typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD_ITALIC)
-                                } else if (item.isBold) {
-                                    typeface = android.graphics.Typeface.DEFAULT_BOLD
-                                } else if (item.isItalic) {
-                                    typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.ITALIC)
+                                typeface = when {
+                                    item.isBold && item.isItalic -> android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD_ITALIC)
+                                    item.isBold -> android.graphics.Typeface.DEFAULT_BOLD
+                                    item.isItalic -> android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.ITALIC)
+                                    else -> android.graphics.Typeface.DEFAULT
                                 }
                             }
-                            val x = ((item.xCo + 1f) / 2f) * width
-                            val y = ((1f - item.yCo) / 2f) * height
-
-                            if (item.rotation != 0f) {
-                                canvas.save()
-                                canvas.rotate(item.rotation, x, y)
-                                canvas.drawText(item.text, x, y, paint)
-                                canvas.restore()
-                            } else {
-                                canvas.drawText(item.text, x, y, paint)
-                            }
+                            val x = ((item.xCo + 1f) / 2f) * width; val y = ((1f - item.yCo) / 2f) * height
+                            if (item.rotation != 0f) { canvas.save(); canvas.rotate(item.rotation, x, y); canvas.drawText(item.text, x, y, paint); canvas.restore() }
+                            else canvas.drawText(item.text, x, y, paint)
                         }
                     }
-
                     for (sub in subtitles) {
-                        val startInTrim = sub.startMs - startMs
-                        val endInTrim = sub.endMs - startMs
-                        if (presentationTimeMs >= startInTrim && presentationTimeMs <= endInTrim) {
-                            val paint = android.graphics.Paint().apply {
-                                color = android.graphics.Color.YELLOW
-                                textSize = height * 0.05f
-                                isAntiAlias = true
-                                textAlign = android.graphics.Paint.Align.CENTER
-                                setShadowLayer(6f, 3f, 3f, android.graphics.Color.BLACK)
-                            }
-                            val x = width / 2f
-                            val y = height * 0.88f
-                            val lines = sub.text.split("\n")
-                            var currentY = y
-                            for (line in lines) {
-                                canvas.drawText(line, x, currentY, paint)
-                                currentY += paint.textSize + 12f
-                            }
+                        val startInTrim = sub.startMs - startMs; val endInTrim = sub.endMs - startMs
+                        if (presentationTimeMs in startInTrim..endInTrim) {
+                            val paint = android.graphics.Paint().apply { color = android.graphics.Color.YELLOW; textSize = height * 0.05f; isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER; setShadowLayer(6f, 3f, 3f, android.graphics.Color.BLACK) }
+                            val x = width / 2f; val y = height * 0.88f
+                            var currentY = y; for (line in sub.text.split("\n")) { canvas.drawText(line, x, currentY, paint); currentY += paint.textSize + 12f }
                         }
                     }
-
                     if (enableTransition && isJoinMode) {
-                        val fadeDurationMs = 1000L
-                        var drawFade = false
-                        var fadeAlpha = 0f
-
-                        if (!isFirstSegment && !hasIntro && presentationTimeMs <= fadeDurationMs) {
-                            val progress = presentationTimeMs.toFloat() / fadeDurationMs.toFloat()
-                            fadeAlpha = 1f - progress.coerceIn(0f, 1f)
-                            drawFade = true
-                        }
-                        else if (!isLastSegment && !hasOutro && presentationTimeMs >= (durationMs - fadeDurationMs)) {
-                            val fadeStart = durationMs - fadeDurationMs
-                            val progress = (presentationTimeMs - fadeStart).toFloat() / fadeDurationMs.toFloat()
-                            fadeAlpha = progress.coerceIn(0f, 1f)
-                            drawFade = true
-                        }
-
+                        val fadeMs = 1000L; var drawFade = false; var fadeAlpha = 0f
+                        if (!isFirstSegment && !hasIntro && presentationTimeMs <= fadeMs) { fadeAlpha = 1f - (presentationTimeMs.toFloat() / fadeMs).coerceIn(0f, 1f); drawFade = true }
+                        else if (!isLastSegment && !hasOutro && presentationTimeMs >= (durationMs - fadeMs)) { fadeAlpha = (presentationTimeMs - (durationMs - fadeMs)).toFloat() / fadeMs; drawFade = true }
                         if (drawFade && fadeAlpha > 0.01f) {
-                            val transitionPaint = android.graphics.Paint().apply {
-                                color = android.graphics.Color.BLACK
-                                alpha = (fadeAlpha * 255).toInt()
-                                style = android.graphics.Paint.Style.FILL
-                            }
-                            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), transitionPaint)
+                            val p = android.graphics.Paint().apply { color = android.graphics.Color.BLACK; alpha = (fadeAlpha * 255).toInt(); style = android.graphics.Paint.Style.FILL }
+                            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
                         }
                     }
-
-                    lastBitmap?.recycle()
-                    lastBitmap = bitmap
-                    return bitmap
+                    lastBitmap?.recycle(); lastBitmap = bitmap; return bitmap
                 }
-
-                override fun getOverlaySettings(presentationTimeUs: Long): androidx.media3.effect.OverlaySettings {
-                    return androidx.media3.effect.OverlaySettings.Builder().build()
-                }
+                override fun getOverlaySettings(presentationTimeUs: Long): androidx.media3.effect.OverlaySettings = androidx.media3.effect.OverlaySettings.Builder().build()
             }
-
-            val overlayEffect = androidx.media3.effect.OverlayEffect(
-                com.google.common.collect.ImmutableList.of<androidx.media3.effect.TextureOverlay>(bitmapOverlay)
-            )
-            effectsList.add(overlayEffect)
+            effectsList.add(androidx.media3.effect.OverlayEffect(com.google.common.collect.ImmutableList.of(bitmapOverlay)))
         }
         return effectsList
     }
 
     fun export(
-        context: Context,
-        videoUri: Uri,
-        startMs: Long,
-        endMs: Long,
-        audioUri: Uri?,
-        audioStartTrimMs: Long = 0L,
-        audioEndTrimMs: Long = 0L,
-        muteOriginalAudio: Boolean,
-        textOverlays: List<VideoTextOverlay>,
-        subtitles: List<SubtitleItem>,
-        videoUri2: Uri? = null,
-        startMs2: Long = 0L,
-        endMs2: Long = 0L,
-        enableTransition: Boolean = true,
-        originalVolume: Float = 1.0f,
-        volumeRangeStartMs: Long = 0L,
-        volumeRangeEndMs: Long = 0L,
-        enableVolumeDucking: Boolean = false,
-        musicVolume: Float = 1.0f,
-        musicRangeStartMs: Long = 0L,
-        musicRangeEndMs: Long = 0L,
-        enableMusicRange: Boolean = false,
-        introImageUri: Uri? = null,
-        introDurationMs: Long = 0L,
-        outroImageUri: Uri? = null,
-        outroDurationMs: Long = 0L,
-        effects: List<EffectItem> = emptyList(),
-        filters: List<FilterItem> = emptyList(),
-        onProgress: (Float) -> Unit,
-        onSuccess: (Uri) -> Unit,
-        onError: (Exception) -> Unit
+        context: Context, videoUri: Uri, startMs: Long, endMs: Long, audioUri: Uri?, audioStartTrimMs: Long = 0L, audioEndTrimMs: Long = 0L, muteOriginalAudio: Boolean, textOverlays: List<VideoTextOverlay>, subtitles: List<SubtitleItem>, videoUri2: Uri? = null, startMs2: Long = 0L, endMs2: Long = 0L, enableTransition: Boolean = true, originalVolume: Float = 1.0f, volumeRangeStartMs: Long = 0L, volumeRangeEndMs: Long = 0L, enableVolumeDucking: Boolean = false, musicVolume: Float = 1.0f, musicRangeStartMs: Long = 0L, musicRangeEndMs: Long = 0L, enableMusicRange: Boolean = false, introImageUri: Uri? = null, introDurationMs: Long = 0L, outroImageUri: Uri? = null, outroDurationMs: Long = 0L, effects: List<EffectItem> = emptyList(), filters: List<FilterItem> = emptyList(), onProgress: (Float) -> Unit, onSuccess: (Uri) -> Unit, onError: (Exception) -> Unit
     ) {
         val coroutineScope = CoroutineScope(Dispatchers.Main)
         coroutineScope.launch {
             try {
-                val outputDir = File(context.cacheDir, "edited_videos")
-                if (!outputDir.exists()) outputDir.mkdirs()
+                val outputDir = File(context.cacheDir, "edited_videos").apply { if (!exists()) mkdirs() }
                 val outputFile = File(outputDir, "edited_video_${System.currentTimeMillis()}.mp4")
-
-                var totalDuration = 0L
-                val videoSegments = mutableListOf<EditedMediaItem>()
-
+                var totalDuration = 0L; val videoSegments = mutableListOf<EditedMediaItem>()
                 if (introImageUri != null && introDurationMs > 0L) {
                     totalDuration += introDurationMs
-                    val introFile = copyUriToCache(context, introImageUri, "intro_image.png")
-                    if (introFile != null) {
-                        val introUri = Uri.fromFile(introFile)
-                        val introMediaItem = MediaItem.Builder().setUri(introUri).build()
-                        val introEffects = createEffectsForSegment(0, introDurationMs, true, false, enableTransition, emptyList(), emptyList(), emptyList(), emptyList(), false, false, false)
-                        videoSegments.add(EditedMediaItem.Builder(introMediaItem).setDurationUs(introDurationMs * 1000L).setFrameRate(30).setEffects(Effects(com.google.common.collect.ImmutableList.of(), com.google.common.collect.ImmutableList.copyOf(introEffects))).build())
+                    copyUriToCache(context, introImageUri, "intro_image.png")?.let {
+                        val effects = createEffectsForSegment(0, introDurationMs, true, false, enableTransition, emptyList(), emptyList(), emptyList(), emptyList(), false, false, false)
+                        videoSegments.add(EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(it))).setDurationUs(introDurationMs * 1000L).setFrameRate(30).setEffects(Effects(com.google.common.collect.ImmutableList.of(), com.google.common.collect.ImmutableList.copyOf(effects))).build())
                     }
                 }
-
-                val duration1 = endMs - startMs
-                totalDuration += duration1
+                val duration1 = endMs - startMs; totalDuration += duration1
                 val seg1Effects = createEffectsForSegment(startMs, duration1, videoSegments.isEmpty(), videoUri2 == null && outroImageUri == null, enableTransition, textOverlays, subtitles, effects, filters, videoUri2 != null || outroImageUri != null || introImageUri != null, introImageUri != null, videoUri2 != null || outroImageUri != null)
-                val videoMediaItem1 = MediaItem.Builder().setUri(videoUri).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(startMs).setEndPositionMs(endMs).build()).build()
-                val videoEditedItemBuilder1 = EditedMediaItem.Builder(videoMediaItem1)
+                val videoEditedItemBuilder1 = EditedMediaItem.Builder(MediaItem.Builder().setUri(videoUri).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(startMs).setEndPositionMs(endMs).build()).build())
                 if (muteOriginalAudio) videoEditedItemBuilder1.setRemoveAudio(true)
                 val seg1AudioProcessors = mutableListOf<AudioProcessor>()
                 if (!muteOriginalAudio) {
-                    if (enableVolumeDucking) {
-                        val overlapStart = volumeRangeStartMs.coerceAtLeast(0); val overlapEnd = volumeRangeEndMs.coerceAtMost(duration1)
-                        if (overlapStart < overlapEnd) seg1AudioProcessors.add(RangeVolumeProcessor(originalVolume, 1.0f, overlapStart, overlapEnd))
-                    } else if (originalVolume < 0.99f || originalVolume > 1.01f) seg1AudioProcessors.add(RangeVolumeProcessor(originalVolume, originalVolume, 0, duration1))
+                    if (enableVolumeDucking) { val oS = volumeRangeStartMs.coerceAtLeast(0); val oE = volumeRangeEndMs.coerceAtMost(duration1); if (oS < oE) seg1AudioProcessors.add(RangeVolumeProcessor(originalVolume, 1.0f, oS, oE)) }
+                    else if (originalVolume < 0.99f || originalVolume > 1.01f) seg1AudioProcessors.add(RangeVolumeProcessor(originalVolume, originalVolume, 0, duration1))
                 }
                 videoSegments.add(videoEditedItemBuilder1.setEffects(Effects(com.google.common.collect.ImmutableList.copyOf(seg1AudioProcessors), com.google.common.collect.ImmutableList.copyOf(seg1Effects))).build())
-
                 if (videoUri2 != null) {
-                    val duration2 = endMs2 - startMs2
-                    totalDuration += duration2
+                    val duration2 = endMs2 - startMs2; totalDuration += duration2
                     val seg2Effects = createEffectsForSegment(startMs2, duration2, false, outroImageUri == null, enableTransition, emptyList(), emptyList(), emptyList(), emptyList(), true, false, false)
                     val videoMediaItem2 = MediaItem.Builder().setUri(videoUri2).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(startMs2).setEndPositionMs(endMs2).build()).build()
                     val videoEditedItemBuilder2 = EditedMediaItem.Builder(videoMediaItem2)
                     if (muteOriginalAudio) videoEditedItemBuilder2.setRemoveAudio(true)
                     val seg2AudioProcessors = mutableListOf<AudioProcessor>()
                     if (!muteOriginalAudio) {
-                        if (enableVolumeDucking) {
-                            val overlapStart = (volumeRangeStartMs - duration1).coerceAtLeast(0); val overlapEnd = (volumeRangeEndMs - duration1).coerceAtMost(duration2)
-                            if (overlapStart < overlapEnd) seg2AudioProcessors.add(RangeVolumeProcessor(originalVolume, 1.0f, overlapStart, overlapEnd))
-                        } else if (originalVolume < 0.99f || originalVolume > 1.01f) seg2AudioProcessors.add(RangeVolumeProcessor(originalVolume, originalVolume, 0, duration2))
+                        if (enableVolumeDucking) { val oS = (volumeRangeStartMs - duration1).coerceAtLeast(0); val oE = (volumeRangeEndMs - duration1).coerceAtMost(duration2); if (oS < oE) seg2AudioProcessors.add(RangeVolumeProcessor(originalVolume, 1.0f, oS, oE)) }
+                        else if (originalVolume < 0.99f || originalVolume > 1.01f) seg2AudioProcessors.add(RangeVolumeProcessor(originalVolume, originalVolume, 0, duration2))
                     }
                     videoSegments.add(videoEditedItemBuilder2.setEffects(Effects(com.google.common.collect.ImmutableList.copyOf(seg2AudioProcessors), com.google.common.collect.ImmutableList.copyOf(seg2Effects))).build())
                 }
-
                 if (outroImageUri != null && outroDurationMs > 0L) {
                     totalDuration += outroDurationMs
-                    val outroFile = copyUriToCache(context, outroImageUri, "outro_image.png")
-                    if (outroFile != null) {
-                        val outroUri = Uri.fromFile(outroFile)
-                        val outroEffects = createEffectsForSegment(0, outroDurationMs, false, true, enableTransition, emptyList(), emptyList(), emptyList(), emptyList(), false, false, false)
-                        videoSegments.add(EditedMediaItem.Builder(MediaItem.Builder().setUri(outroUri).build()).setDurationUs(outroDurationMs * 1000L).setFrameRate(30).setEffects(Effects(com.google.common.collect.ImmutableList.of(), com.google.common.collect.ImmutableList.copyOf(outroEffects))).build())
+                    copyUriToCache(context, outroImageUri, "outro_image.png")?.let {
+                        val effects = createEffectsForSegment(0, outroDurationMs, false, true, enableTransition, emptyList(), emptyList(), emptyList(), emptyList(), false, false, false)
+                        videoSegments.add(EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(it))).setDurationUs(outroDurationMs * 1000L).setFrameRate(30).setEffects(Effects(com.google.common.collect.ImmutableList.of(), com.google.common.collect.ImmutableList.copyOf(effects))).build())
                     }
                 }
-
                 val sequences = mutableListOf(EditedMediaItemSequence(videoSegments))
                 if (audioUri != null) {
                     val audioEditedItemBuilder = EditedMediaItem.Builder(MediaItem.Builder().setUri(audioUri).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(audioStartTrimMs).setEndPositionMs(if (audioEndTrimMs > 0) audioEndTrimMs else (audioStartTrimMs + totalDuration)).build()).build()).setRemoveVideo(true)
@@ -431,14 +274,12 @@ object VideoExporter {
                     if (musicProcessors.isNotEmpty()) audioEditedItemBuilder.setEffects(Effects(com.google.common.collect.ImmutableList.copyOf(musicProcessors), com.google.common.collect.ImmutableList.of()))
                     sequences.add(EditedMediaItemSequence(audioEditedItemBuilder.build()))
                 }
-
-                val composition = Composition.Builder(sequences).experimentalSetForceAudioTrack(true).build()
                 val transformer = Transformer.Builder(context).setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264).setAudioMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC).build()
                 transformer.addListener(object : Transformer.Listener {
                     override fun onCompleted(composition: Composition, exportResult: ExportResult) { onSuccess(insertVideoToGallery(context, outputFile, "EditedVideo_${System.currentTimeMillis()}") ?: Uri.fromFile(outputFile)) }
                     override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) { onError(exportException) }
                 })
-                transformer.start(composition, outputFile.absolutePath)
+                transformer.start(Composition.Builder(sequences).experimentalSetForceAudioTrack(true).build(), outputFile.absolutePath)
                 coroutineScope.launch(Dispatchers.Main) {
                     val progressHolder = ProgressHolder()
                     while (true) {
