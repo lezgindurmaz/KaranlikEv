@@ -83,10 +83,14 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -567,6 +571,86 @@ fun VideoEditorApp() {
                                 .height(250.dp)
                                 .background(Color.Black)
                         ) {
+                            val originalTimeMs = currentPlaybackPositionMs + startTrimMs
+
+                            // Determine active effect for preview
+                            var currentScale = 1.0f
+                            var currentTranslationX = 0f
+
+                            // Check added effects
+                            appliedEffects.forEach { effect ->
+                                if (originalTimeMs in effect.startMs..effect.endMs) {
+                                    val progress = (originalTimeMs - effect.startMs).toFloat() / (effect.endMs - effect.startMs).coerceAtLeast(1L).toFloat()
+                                    when (effect.type) {
+                                        EffectType.ZOOM_IN -> currentScale = 1.0f + (progress * 0.4f)
+                                        EffectType.ZOOM_OUT -> currentScale = 1.4f - (progress * 0.4f)
+                                        EffectType.SLIDE_LEFT -> currentTranslationX = progress * 100f
+                                        EffectType.SLIDE_RIGHT -> currentTranslationX = -progress * 100f
+                                        else -> {}
+                                    }
+                                }
+                            }
+
+                            // Check pending effect (if any)
+                            if (originalTimeMs in effectStartMs..effectEndMs) {
+                                val progress = (originalTimeMs - effectStartMs).toFloat() / (effectEndMs - effectStartMs).coerceAtLeast(1L).toFloat()
+                                when (selectedEffectType) {
+                                    EffectType.ZOOM_IN -> currentScale = 1.0f + (progress * 0.4f)
+                                    EffectType.ZOOM_OUT -> currentScale = 1.4f - (progress * 0.4f)
+                                    EffectType.SLIDE_LEFT -> currentTranslationX = progress * 100f
+                                    EffectType.SLIDE_RIGHT -> currentTranslationX = -progress * 100f
+                                    else -> {}
+                                }
+                            }
+
+                            // Determine active filter for preview
+                            var currentColorMatrix: ColorMatrix? = null
+
+                            fun getFilterMatrix(type: FilterType): ColorMatrix {
+                                return when (type) {
+                                    FilterType.GRAYSCALE -> ColorMatrix().apply { setToSaturation(0f) }
+                                    FilterType.SEPIA -> ColorMatrix(floatArrayOf(
+                                        0.393f, 0.769f, 0.189f, 0f, 0f,
+                                        0.349f, 0.686f, 0.168f, 0f, 0f,
+                                        0.272f, 0.534f, 0.131f, 0f, 0f,
+                                        0f, 0f, 0f, 1f, 0f
+                                    ))
+                                    FilterType.CYBERPUNK -> ColorMatrix(floatArrayOf(
+                                        1.5f, -0.5f, 0.5f, 0f, 0f,
+                                        -0.5f, 1.0f, 1.5f, 0f, 0f,
+                                        0.5f, 0f, 2.0f, 0f, 0f,
+                                        0f, 0f, 0f, 1f, 0f
+                                    ))
+                                    FilterType.VINTAGE -> ColorMatrix(floatArrayOf(
+                                        0.9f, 0.1f, 0.1f, 0f, 0f,
+                                        0.2f, 0.8f, 0.1f, 0f, 0f,
+                                        0.1f, 0.2f, 0.7f, 0f, 0f,
+                                        0f, 0f, 0f, 1f, 0f
+                                    ))
+                                    FilterType.COOL -> ColorMatrix(floatArrayOf(
+                                        0.7f, 0f, 0f, 0f, 0f,
+                                        0f, 0.8f, 0f, 0f, 0f,
+                                        0.3f, 0.5f, 1.4f, 0f, 0f,
+                                        0f, 0f, 0f, 1f, 0f
+                                    ))
+                                    FilterType.WARM -> ColorMatrix(floatArrayOf(
+                                        1.4f, 0f, 0f, 0f, 0f,
+                                        0f, 1.1f, 0f, 0f, 0f,
+                                        0f, 0f, 0.8f, 0f, 0f,
+                                        0f, 0f, 0f, 1f, 0f
+                                    ))
+                                }
+                            }
+
+                            appliedFilters.forEach { filter ->
+                                if (originalTimeMs in filter.startMs..filter.endMs) {
+                                    currentColorMatrix = getFilterMatrix(filter.type)
+                                }
+                            }
+                            if (originalTimeMs in filterStartMs..filterEndMs) {
+                                currentColorMatrix = getFilterMatrix(selectedFilterType)
+                            }
+
                             // Player View Wrapper
                             AndroidView(
                                 factory = { ctx ->
@@ -575,8 +659,32 @@ fun VideoEditorApp() {
                                         useController = false
                                     }
                                 },
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        scaleX = currentScale
+                                        scaleY = currentScale
+                                        translationX = currentTranslationX
+                                    }
                             )
+
+                            // Apply Color Filter via overlay if active
+                            if (currentColorMatrix != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .drawWithCache {
+                                            onDrawWithContent {
+                                                drawContent()
+                                                drawRect(
+                                                    color = Color.Black,
+                                                    colorFilter = ColorFilter.colorMatrix(currentColorMatrix!!),
+                                                    blendMode = androidx.compose.ui.graphics.BlendMode.Color
+                                                )
+                                            }
+                                        }
+                                )
+                            }
 
                             // Live Preview Overlays (Texts & Subtitles)
                             Box(modifier = Modifier.fillMaxSize()) {
@@ -2058,7 +2166,7 @@ fun VideoEditorApp() {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Vidyoya Efekt Ekle",
+                                    text = "Videoya Efekt Ekle",
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
