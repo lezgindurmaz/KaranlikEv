@@ -1,21 +1,30 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Advanced Mobile Video Editor
 
-# Run and deploy your AI Studio app
+Bu proje, Android platformu için geliştirilmiş gelişmiş bir mobil video düzenleme uygulamasıdır. Kullanıcıların videolarını profesyonel bir şekilde düzenlemelerine olanak tanır.
 
-This contains everything you need to run your app locally.
+## 🚀 Yeni Özellikler
 
-View your app in AI Studio: https://ai.studio/apps/3f0848e9-7134-48ee-8d85-71c0cf60c792
+- **Müzik Kırpma:** Eklenen arka plan müziklerinin başlangıç ve bitiş noktalarını uygulama içerisinden kolayca belirleyebilirsiniz.
+- **Gelişmiş Metin Düzenleme:**
+    - **Döndürme:** Metinleri istediğiniz açıyla döndürebilirsiniz.
+    - **Stil:** Metinleri kalın (bold) veya italik yapma seçeneği.
+- **Video Birleştirme:** Birden fazla videoyu geçiş efektleri ile birleştirme.
+- **Altyazı Desteği:** .SRT dosyalarını içe aktarma ve video üzerine uygulama.
+- **Kapanış Görseli (Outro):** Videonun sonuna özel görseller ekleme.
 
-## Run Locally
+## 🛠️ Teknik Özellikler
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+- **Dil:** Kotlin
+- **UI:** Jetpack Compose
+- **Video İşleme:** Media3 Transformer API
+- **Minimum SDK:** 24 (Android 7.0)
 
+## 📦 Kurulum
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+1. Bu depoyu klonlayın.
+2. Android Studio ile açın.
+3. `./gradlew assembleDebug` komutu ile APK üretin.
+
+## 📜 Lisans
+
+Bu proje eğitim amaçlı geliştirilmiştir.
