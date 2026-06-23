@@ -1,0 +1,6 @@
+{
+  "name": "Video Editor",
+  "description": "A fully functional mobile video editor to select videos, trim parts, adjust audio volume, and export the edited result.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
