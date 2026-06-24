@@ -17,7 +17,8 @@ data class VideoTextOverlay(
 data class SubtitleItem(
     val startMs: Long,
     val endMs: Long,
-    val text: String
+    val text: String,
+    val colorHex: String = "#FFFF00" // Default Yellow
 ) : Serializable
 
 enum class EffectType {

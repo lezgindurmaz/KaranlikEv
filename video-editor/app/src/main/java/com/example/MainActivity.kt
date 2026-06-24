@@ -37,6 +37,8 @@ import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -130,6 +132,9 @@ class MainActivity : ComponentActivity() {
 fun VideoEditorApp() {
     val context = LocalContext.current
 
+    var appLanguage by rememberSaveable { mutableStateOf(AppLanguage.EN) }
+    var showSettings by remember { mutableStateOf(false) }
+
     // File State
     var videoUri by rememberSaveable { mutableStateOf<Uri?>(null) }
     var videoName by rememberSaveable { mutableStateOf("") }
@@ -184,6 +189,7 @@ fun VideoEditorApp() {
     ) { mutableStateListOf<SubtitleItem>() }
     var srtContent by rememberSaveable { mutableStateOf("") }
     var srtFileName by rememberSaveable { mutableStateOf("") }
+    var selectedSubtitleColorHex by rememberSaveable { mutableStateOf("#FFFF00") }
 
     // Effects & Filters state
     val appliedEffects = rememberSaveable(
@@ -443,7 +449,7 @@ fun VideoEditorApp() {
                     srtFileName = Utils.getFileName(context, uri)
                     val items = Utils.parseSrt(content)
                     srtSubtitlesList.clear()
-                    srtSubtitlesList.addAll(items)
+                    srtSubtitlesList.addAll(items.map { it.copy(colorHex = selectedSubtitleColorHex) })
                     Toast.makeText(context, "${items.size} altyazı başarıyla yüklendi!", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
@@ -486,27 +492,38 @@ fun VideoEditorApp() {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Header Title
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 24.dp, horizontal = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .padding(vertical = 24.dp, horizontal = 16.dp)
             ) {
-                Text(
-                    text = "CINEFX",
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 4.sp,
-                    color = NeonCyan,
-                    textAlign = TextAlign.Center
-                )
-                Text(
-                    text = "Gelişmiş Mobil Video Düzenleyici",
-                    fontSize = 12.sp,
-                    color = TextMuted,
-                    letterSpacing = 1.sp,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = Strings.get("app_title", appLanguage),
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 4.sp,
+                        color = NeonCyan,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = Strings.get("app_subtitle", appLanguage),
+                        fontSize = 12.sp,
+                        color = TextMuted,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = { showSettings = true },
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = TextLight)
+                }
             }
 
             // Top Area: Media Selection / Video Preview
@@ -542,21 +559,21 @@ fun VideoEditorApp() {
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Movie,
-                                contentDescription = "Video Seçin",
+                                contentDescription = Strings.get("select_video", appLanguage),
                                 tint = NeonCyan,
                                 modifier = Modifier.size(36.dp)
                             )
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "Bir Video Seçin",
+                            text = Strings.get("select_video", appLanguage),
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextLight
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Düzenlemeye başlamak için galerinize göz atın.",
+                            text = Strings.get("select_video_desc", appLanguage),
                             fontSize = 13.sp,
                             color = TextMuted,
                             textAlign = TextAlign.Center
@@ -573,35 +590,9 @@ fun VideoEditorApp() {
                         ) {
                             val originalTimeMs = currentPlaybackPositionMs + startTrimMs
 
-                            // Determine active effect for preview
+                            // Effects are now export-only as requested.
                             var currentScale = 1.0f
                             var currentTranslationX = 0f
-
-                            // Check added effects
-                            appliedEffects.forEach { effect ->
-                                if (originalTimeMs in effect.startMs..effect.endMs) {
-                                    val progress = (originalTimeMs - effect.startMs).toFloat() / (effect.endMs - effect.startMs).coerceAtLeast(1L).toFloat()
-                                    when (effect.type) {
-                                        EffectType.ZOOM_IN -> currentScale = 1.0f + (progress * 0.4f)
-                                        EffectType.ZOOM_OUT -> currentScale = 1.4f - (progress * 0.4f)
-                                        EffectType.SLIDE_LEFT -> currentTranslationX = progress * 100f
-                                        EffectType.SLIDE_RIGHT -> currentTranslationX = -progress * 100f
-                                        else -> {}
-                                    }
-                                }
-                            }
-
-                            // Check pending effect (if any)
-                            if (originalTimeMs in effectStartMs..effectEndMs) {
-                                val progress = (originalTimeMs - effectStartMs).toFloat() / (effectEndMs - effectStartMs).coerceAtLeast(1L).toFloat()
-                                when (selectedEffectType) {
-                                    EffectType.ZOOM_IN -> currentScale = 1.0f + (progress * 0.4f)
-                                    EffectType.ZOOM_OUT -> currentScale = 1.4f - (progress * 0.4f)
-                                    EffectType.SLIDE_LEFT -> currentTranslationX = progress * 100f
-                                    EffectType.SLIDE_RIGHT -> currentTranslationX = -progress * 100f
-                                    else -> {}
-                                }
-                            }
 
                             // Determine active filter for preview
                             var currentColorMatrix: ColorMatrix? = null
@@ -642,13 +633,11 @@ fun VideoEditorApp() {
                                 }
                             }
 
+                            // Filters are previewed AFTER being added to the list.
                             appliedFilters.forEach { filter ->
                                 if (originalTimeMs in filter.startMs..filter.endMs) {
                                     currentColorMatrix = getFilterMatrix(filter.type)
                                 }
-                            }
-                            if (originalTimeMs in filterStartMs..filterEndMs) {
-                                currentColorMatrix = getFilterMatrix(selectedFilterType)
                             }
 
                             // Player View Wrapper
@@ -750,7 +739,7 @@ fun VideoEditorApp() {
                                         if (originalTimeMs >= sub.startMs && originalTimeMs <= sub.endMs) {
                                             Text(
                                                 text = sub.text,
-                                                color = Color.Yellow,
+                                                color = Color(android.graphics.Color.parseColor(sub.colorHex)),
                                                 fontSize = 14.sp,
                                                 textAlign = TextAlign.Center,
                                                 style = androidx.compose.ui.text.TextStyle(
@@ -810,7 +799,7 @@ fun VideoEditorApp() {
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Videoyu Değiştir",
+                                    contentDescription = Strings.get("change_video", appLanguage),
                                     tint = NeonCyan,
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -826,14 +815,14 @@ fun VideoEditorApp() {
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "Seçilen Aralık: ${Utils.formatTime(startTrimMs)} - ${Utils.formatTime(endTrimMs)}",
+                                    text = "${Strings.get("selected_range", appLanguage)}: ${Utils.formatTime(startTrimMs)} - ${Utils.formatTime(endTrimMs)}",
                                     fontSize = 12.sp,
                                     color = TextLight,
                                     fontWeight = FontWeight.SemiBold
                                 )
 
                                 Text(
-                                    text = "Toplam Kırpılmış: ${Utils.formatTime(endTrimMs - startTrimMs)}",
+                                    text = "${Strings.get("total_trimmed", appLanguage)}: ${Utils.formatTime(endTrimMs - startTrimMs)}",
                                     fontSize = 12.sp,
                                     color = NeonCyan,
                                     fontWeight = FontWeight.SemiBold
@@ -880,7 +869,7 @@ fun VideoEditorApp() {
                 ) {
                     // Video duration details info name
                     Text(
-                        text = "Dosya: $videoName",
+                        text = "${Strings.get("file", appLanguage)}: $videoName",
                         fontSize = 13.sp,
                         color = TextMuted,
                         textAlign = TextAlign.Center,
@@ -908,7 +897,7 @@ fun VideoEditorApp() {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Videoyu Kırpma",
+                                    text = Strings.get("trim_video", appLanguage),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
@@ -919,7 +908,7 @@ fun VideoEditorApp() {
 
                             // Start Slider
                             Text(
-                                text = "Başlangıç Noktası (Kırp): ${Utils.formatTime(startTrimMs)}",
+                                text = "${Strings.get("start_point", appLanguage)}: ${Utils.formatTime(startTrimMs)}",
                                 fontSize = 13.sp,
                                 color = TextLight,
                                 fontWeight = FontWeight.Medium
@@ -945,7 +934,7 @@ fun VideoEditorApp() {
 
                             // End Slider
                             Text(
-                                text = "Bitiş Noktası (Kırp): ${Utils.formatTime(endTrimMs)}",
+                                text = "${Strings.get("end_point", appLanguage)}: ${Utils.formatTime(endTrimMs)}",
                                 fontSize = 13.sp,
                                 color = TextLight,
                                 fontWeight = FontWeight.Medium
@@ -994,7 +983,7 @@ fun VideoEditorApp() {
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "İkinci Videoyu Birleştir",
+                                        text = Strings.get("join_second", appLanguage),
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = TextLight
@@ -1011,7 +1000,7 @@ fun VideoEditorApp() {
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Delete,
-                                            contentDescription = "İkinci Videoyu Kaldır",
+                                            contentDescription = Strings.get("remove_second", appLanguage),
                                             tint = HotPink,
                                             modifier = Modifier.size(20.dp)
                                         )
@@ -1028,13 +1017,13 @@ fun VideoEditorApp() {
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Icon(Icons.Default.Movie, "Seç", tint = Color.White)
+                                    Icon(Icons.Default.Movie, Strings.get("entry", appLanguage), tint = Color.White)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Birleştirilecek İkinci Videoyu Seç", color = Color.White)
+                                    Text(Strings.get("select_second", appLanguage), color = Color.White)
                                 }
                             } else {
                                 Text(
-                                    text = "Dosya: $videoName2",
+                                    text = "${Strings.get("file", appLanguage)}: $videoName2",
                                     fontSize = 13.sp,
                                     color = TextMuted,
                                     maxLines = 1,
@@ -1049,13 +1038,13 @@ fun VideoEditorApp() {
                                 ) {
                                     Column {
                                         Text(
-                                            text = "Yumuşak Geçiş Efekti (Fade)",
+                                            text = Strings.get("fade_effect", appLanguage),
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium,
                                             color = TextLight
                                         )
                                         Text(
-                                            text = "1 saniyelik siyah ekran geçişi uygular.",
+                                            text = Strings.get("fade_desc", appLanguage),
                                             fontSize = 11.sp,
                                             color = TextMuted
                                         )
@@ -1074,7 +1063,7 @@ fun VideoEditorApp() {
 
                                 // Second Video Start Slider
                                 Text(
-                                    text = "İkinci Başlangıç Noktası (Kırp): ${Utils.formatTime(startTrimMs2)}",
+                                    text = "${Strings.get("second_start", appLanguage)}: ${Utils.formatTime(startTrimMs2)}",
                                     fontSize = 13.sp,
                                     color = TextLight,
                                     fontWeight = FontWeight.Medium
@@ -1097,7 +1086,7 @@ fun VideoEditorApp() {
 
                                 // Second Video End Slider
                                 Text(
-                                    text = "İkinci Bitiş Noktası (Kırp): ${Utils.formatTime(endTrimMs2)}",
+                                    text = "${Strings.get("second_end", appLanguage)}: ${Utils.formatTime(endTrimMs2)}",
                                     fontSize = 13.sp,
                                     color = TextLight,
                                     fontWeight = FontWeight.Medium
@@ -1139,7 +1128,7 @@ fun VideoEditorApp() {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Müzik Ekleme / Ses Ayarları",
+                                    text = Strings.get("audio_settings", appLanguage),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
@@ -1166,13 +1155,13 @@ fun VideoEditorApp() {
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Column {
                                         Text(
-                                            text = "Orijinal Sesi Kapat",
+                                            text = Strings.get("mute_original", appLanguage),
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium,
                                             color = TextLight
                                         )
                                         Text(
-                                            text = "Videonun kendi sesini tamamen susturur.",
+                                            text = Strings.get("mute_desc", appLanguage),
                                             fontSize = 11.sp,
                                             color = TextMuted
                                         )
@@ -1198,7 +1187,7 @@ fun VideoEditorApp() {
                                 )
 
                                 Text(
-                                    text = "Orijinal Ses Seviyesi: %${(originalVolume * 100).toInt()}",
+                                    text = "${Strings.get("original_volume", appLanguage)}: %${(originalVolume * 100).toInt()}",
                                     fontSize = 12.sp,
                                     color = TextLight,
                                     fontWeight = FontWeight.Medium
@@ -1224,13 +1213,13 @@ fun VideoEditorApp() {
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "Sesi Belirli Bölümde Kıs/Ayarla",
+                                            text = Strings.get("ducking", appLanguage),
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Medium,
                                             color = TextLight
                                         )
                                         Text(
-                                            text = "Seçilen sürede ayarlı sesi uygular, dışarıda tam ses.",
+                                            text = Strings.get("ducking_desc", appLanguage),
                                             fontSize = 11.sp,
                                             color = TextMuted
                                         )
@@ -1248,7 +1237,7 @@ fun VideoEditorApp() {
                                 if (enableVolumeDucking && totalTrimmedDurationMs > 0L) {
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
-                                        text = "Kısma Aralığı: ${(volumeRangeStartMs / 1000)}s - ${(volumeRangeEndMs / 1000)}s",
+                                        text = "${Strings.get("ducking_range", appLanguage)}: ${(volumeRangeStartMs / 1000)}s - ${(volumeRangeEndMs / 1000)}s",
                                         fontSize = 12.sp,
                                         color = NeonCyan,
                                         fontWeight = FontWeight.Bold
@@ -1256,7 +1245,7 @@ fun VideoEditorApp() {
                                     Spacer(modifier = Modifier.height(4.dp))
 
                                     Text(
-                                        text = "Başlangıç Saniyesi: ${(volumeRangeStartMs / 1000)}s",
+                                        text = "${Strings.get("start_point", appLanguage)}: ${(volumeRangeStartMs / 1000)}s",
                                         fontSize = 11.sp,
                                         color = TextMuted
                                     )
@@ -1275,7 +1264,7 @@ fun VideoEditorApp() {
                                     )
 
                                     Text(
-                                        text = "Bitiş Saniyesi: ${(volumeRangeEndMs / 1000)}s",
+                                        text = "${Strings.get("end_point", appLanguage)}: ${(volumeRangeEndMs / 1000)}s",
                                         fontSize = 11.sp,
                                         color = TextMuted
                                     )
@@ -1317,7 +1306,7 @@ fun VideoEditorApp() {
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Arka Plan Müziği Ekle",
+                                        text = Strings.get("add_music", appLanguage),
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     )
@@ -1374,7 +1363,7 @@ fun VideoEditorApp() {
 
                                     // Background music volume control
                                     Text(
-                                        text = "Müzik Sesi Seviyesi: %${(audioVolume * 100).toInt()}",
+                                        text = "${Strings.get("music_volume", appLanguage)}: %${(audioVolume * 100).toInt()}",
                                         fontSize = 12.sp,
                                         color = TextLight
                                     )
@@ -1400,7 +1389,7 @@ fun VideoEditorApp() {
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = "Müziği Kırp",
+                                            text = Strings.get("trim_music", appLanguage),
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = TextLight
@@ -1410,7 +1399,7 @@ fun VideoEditorApp() {
                                     Spacer(modifier = Modifier.height(8.dp))
 
                                     Text(
-                                        text = "Başlangıç: ${Utils.formatTime(audioStartTrimMs)}",
+                                        text = "${Strings.get("entry", appLanguage)}: ${Utils.formatTime(audioStartTrimMs)}",
                                         fontSize = 12.sp,
                                         color = TextLight
                                     )
@@ -1422,7 +1411,7 @@ fun VideoEditorApp() {
                                     )
 
                                     Text(
-                                        text = "Bitiş: ${Utils.formatTime(audioEndTrimMs)}",
+                                        text = "${Strings.get("exit", appLanguage)}: ${Utils.formatTime(audioEndTrimMs)}",
                                         fontSize = 12.sp,
                                         color = TextLight
                                     )
@@ -1442,13 +1431,13 @@ fun VideoEditorApp() {
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = "Müziği Sadece Belirli Bölümde Çal",
+                                                text = Strings.get("music_range_toggle", appLanguage),
                                                 fontSize = 13.sp,
                                                 fontWeight = FontWeight.Medium,
                                                 color = TextLight
                                             )
                                             Text(
-                                                text = "Müzik sadece seçilen zaman aralığında çalar.",
+                                                text = Strings.get("music_range_desc", appLanguage),
                                                 fontSize = 11.sp,
                                                 color = TextMuted
                                             )
@@ -1474,7 +1463,7 @@ fun VideoEditorApp() {
                                         Spacer(modifier = Modifier.height(4.dp))
 
                                         Text(
-                                            text = "Başlangıç Saniyesi: ${(musicRangeStartMs / 1000)}s",
+                                            text = "${Strings.get("start_point", appLanguage)}: ${(musicRangeStartMs / 1000)}s",
                                             fontSize = 11.sp,
                                             color = TextMuted
                                         )
@@ -1493,7 +1482,7 @@ fun VideoEditorApp() {
                                         )
 
                                         Text(
-                                            text = "Bitiş Saniyesi: ${(musicRangeEndMs / 1000)}s",
+                                            text = "${Strings.get("end_point", appLanguage)}: ${(musicRangeEndMs / 1000)}s",
                                             fontSize = 11.sp,
                                             color = TextMuted
                                         )
@@ -1536,7 +1525,7 @@ fun VideoEditorApp() {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Giriş Görseli (Intro) Ekle",
+                                    text = Strings.get("intro_title", appLanguage),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
@@ -1558,7 +1547,7 @@ fun VideoEditorApp() {
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Giriş Görseli Seç (Galeriden)",
+                                        text = Strings.get("select_image", appLanguage),
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     )
@@ -1613,7 +1602,7 @@ fun VideoEditorApp() {
                                      Spacer(modifier = Modifier.height(12.dp))
 
                                      Text(
-                                         text = "Giriş Süresi: ${(introDurationMs / 1000)} Saniye",
+                                         text = "${Strings.get("intro_duration", appLanguage)}: ${(introDurationMs / 1000)}s",
                                          fontSize = 12.sp,
                                          color = TextLight,
                                          fontWeight = FontWeight.Medium
@@ -1654,7 +1643,7 @@ fun VideoEditorApp() {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Kapanış Görseli (Outro) Ekle",
+                                    text = Strings.get("outro_title", appLanguage),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
@@ -1731,7 +1720,7 @@ fun VideoEditorApp() {
                                      Spacer(modifier = Modifier.height(12.dp))
 
                                      Text(
-                                         text = "Kapanış Süresi: ${(outroDurationMs / 1000)} Saniye",
+                                         text = "${Strings.get("outro_duration", appLanguage)}: ${(outroDurationMs / 1000)}s",
                                          fontSize = 12.sp,
                                          color = TextLight,
                                          fontWeight = FontWeight.Medium
@@ -1779,7 +1768,7 @@ fun VideoEditorApp() {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Metin Ekleme (Video Üzerine)",
+                                    text = Strings.get("add_text", appLanguage),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
@@ -1792,7 +1781,7 @@ fun VideoEditorApp() {
                             OutlinedTextField(
                                 value = newOverlayText,
                                 onValueChange = { newOverlayText = it },
-                                label = { Text("Mevcut Metin") },
+                                label = { Text(Strings.get("current_text", appLanguage)) },
                                 textStyle = androidx.compose.ui.text.TextStyle(color = TextLight),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = NeonCyan,
@@ -1808,7 +1797,7 @@ fun VideoEditorApp() {
 
                             // Numerical/Slider Tool: Text size
                             Text(
-                                text = "Metin Boyutu: ${newOverlaySize.toInt()} sp",
+                                text = "${Strings.get("text_size", appLanguage)}: ${newOverlaySize.toInt()} sp",
                                 fontSize = 13.sp,
                                 color = TextLight,
                                 fontWeight = FontWeight.Medium
@@ -1838,7 +1827,7 @@ fun VideoEditorApp() {
                                         colors = SwitchDefaults.colors(checkedThumbColor = NeonCyan)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Kalın", color = TextLight, fontSize = 12.sp)
+                                    Text(Strings.get("bold", appLanguage), color = TextLight, fontSize = 12.sp)
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                     Switch(
@@ -1847,14 +1836,30 @@ fun VideoEditorApp() {
                                         colors = SwitchDefaults.colors(checkedThumbColor = NeonCyan)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Eğik", color = TextLight, fontSize = 12.sp)
+                                    Text(Strings.get("italic", appLanguage), color = TextLight, fontSize = 12.sp)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(text = Strings.get("subtitle_color", appLanguage), color = TextLight, fontSize = 13.sp)
+                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("#FFFF00", "#FFFFFF", "#FF0000", "#00FFFF", "#00FF00").forEach { hex ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(android.graphics.Color.parseColor(hex)))
+                                            .border(if (selectedSubtitleColorHex == hex) 2.dp else 0.dp, Color.White, CircleShape)
+                                            .clickable { selectedSubtitleColorHex = hex }
+                                    )
                                 }
                             }
 
                             Spacer(modifier = Modifier.height(12.dp))
 
                             Text(
-                                text = "Döndürme: ${newOverlayRotation.toInt()}°",
+                                text = "${Strings.get("rotation", appLanguage)}: ${newOverlayRotation.toInt()}°",
                                 fontSize = 13.sp,
                                 color = TextLight,
                                 fontWeight = FontWeight.Medium
@@ -1878,7 +1883,7 @@ fun VideoEditorApp() {
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "X Koordinatı: ${String.format("%.2f", newOverlayX)}",
+                                        text = "${Strings.get("x_coord", appLanguage)}: ${String.format("%.2f", newOverlayX)}",
                                         fontSize = 12.sp,
                                         color = TextLight
                                     )
@@ -1894,7 +1899,7 @@ fun VideoEditorApp() {
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Y Koordinatı: ${String.format("%.2f", newOverlayY)}",
+                                        text = "${Strings.get("y_coord", appLanguage)}: ${String.format("%.2f", newOverlayY)}",
                                         fontSize = 12.sp,
                                         color = TextLight
                                     )
@@ -1919,7 +1924,7 @@ fun VideoEditorApp() {
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Giriş: ${Utils.formatTime(newOverlayStartMs)}",
+                                        text = "${Strings.get("entry", appLanguage)}: ${Utils.formatTime(newOverlayStartMs)}",
                                         fontSize = 12.sp,
                                         color = TextLight
                                     )
@@ -1932,7 +1937,7 @@ fun VideoEditorApp() {
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Çıkış: ${Utils.formatTime(newOverlayEndMs)}",
+                                        text = "${Strings.get("exit", appLanguage)}: ${Utils.formatTime(newOverlayEndMs)}",
                                         fontSize = 12.sp,
                                         color = TextLight
                                     )
@@ -1977,16 +1982,16 @@ fun VideoEditorApp() {
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Icon(Icons.Default.Add, "Ekle", tint = SpaceObsidian)
+                                Icon(Icons.Default.Add, Strings.get("entry", appLanguage), tint = SpaceObsidian)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Metni Ekle", fontWeight = FontWeight.Bold, color = SpaceObsidian)
+                                Text(Strings.get("add_text_btn", appLanguage), fontWeight = FontWeight.Bold, color = SpaceObsidian)
                             }
 
                             // Added Text overlays list visualization
                             if (textOverlaysList.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
-                                    text = "Eklenen Metinler:",
+                                    text = Strings.get("added_texts", appLanguage),
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
@@ -2052,7 +2057,7 @@ fun VideoEditorApp() {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Altyazı Dosyası (.SRT) Ekle",
+                                    text = Strings.get("add_subtitle", appLanguage),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
@@ -2071,7 +2076,7 @@ fun VideoEditorApp() {
                                 Icon(Icons.Default.Subtitles, "Altyazı Dosyası Seç", tint = Color.White)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = if (srtFileName.isNotEmpty()) srtFileName else "Altyazı (.srt) Dosyası Seç",
+                                    text = if (srtFileName.isNotEmpty()) srtFileName else Strings.get("select_srt", appLanguage),
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
@@ -2085,7 +2090,7 @@ fun VideoEditorApp() {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "${srtSubtitlesList.size} altyazı öğesi aktif durumda.",
+                                        text = "${srtSubtitlesList.size} ${Strings.get("srt_active", appLanguage)}",
                                         fontSize = 12.sp,
                                         color = NeonCyan,
                                         fontWeight = FontWeight.SemiBold
@@ -2111,7 +2116,7 @@ fun VideoEditorApp() {
                             Spacer(modifier = Modifier.height(12.dp))
 
                             Text(
-                                text = "Alternatif: Altyazı içeriğini yapıştırabilirsiniz",
+                                text = Strings.get("srt_paste", appLanguage),
                                 fontSize = 11.sp,
                                 color = TextMuted
                             )
@@ -2125,12 +2130,12 @@ fun VideoEditorApp() {
                                     if (contentVal.isNotBlank()) {
                                         val items = Utils.parseSrt(contentVal)
                                         srtSubtitlesList.clear()
-                                        srtSubtitlesList.addAll(items)
+                                            srtSubtitlesList.addAll(items.map { it.copy(colorHex = selectedSubtitleColorHex) })
                                     } else {
                                         srtSubtitlesList.clear()
                                     }
                                 },
-                                label = { Text("SRT Altyazı Kodları / Metni") },
+                                label = { Text(Strings.get("srt_placeholder", appLanguage)) },
                                 placeholder = { Text("1\n00:00:01,000 --> 00:00:04,000\nMerhaba video!") },
                                 textStyle = androidx.compose.ui.text.TextStyle(color = TextLight, fontSize = 11.sp),
                                 colors = OutlinedTextFieldDefaults.colors(
@@ -2166,7 +2171,7 @@ fun VideoEditorApp() {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Videoya Efekt Ekle",
+                                    text = Strings.get("add_effect", appLanguage),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
@@ -2193,7 +2198,7 @@ fun VideoEditorApp() {
 
                             Spacer(modifier = Modifier.height(12.dp))
 
-                            Text("Aralık: ${Utils.formatTime(effectStartMs)} - ${Utils.formatTime(effectEndMs)}", color = TextLight, fontSize = 12.sp)
+                            Text("${Strings.get("ducking_range", appLanguage)}: ${Utils.formatTime(effectStartMs)} - ${Utils.formatTime(effectEndMs)}", color = TextLight, fontSize = 12.sp)
                             Slider(
                                 value = effectStartMs.toFloat(),
                                 onValueChange = { effectStartMs = it.toLong().coerceAtMost(effectEndMs - 500L) },
@@ -2214,7 +2219,7 @@ fun VideoEditorApp() {
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
                             ) {
-                                Text("Efekti Ekle", color = SpaceObsidian)
+                                Text(Strings.get("add_effect_btn", appLanguage), color = SpaceObsidian)
                             }
 
                             appliedEffects.forEachIndexed { index, item ->
@@ -2246,7 +2251,7 @@ fun VideoEditorApp() {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Renk Filtreleri",
+                                    text = Strings.get("add_filter", appLanguage),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
@@ -2288,7 +2293,7 @@ fun VideoEditorApp() {
 
                             Spacer(modifier = Modifier.height(12.dp))
 
-                            Text("Aralık: ${Utils.formatTime(filterStartMs)} - ${Utils.formatTime(filterEndMs)}", color = TextLight, fontSize = 12.sp)
+                            Text("${Strings.get("ducking_range", appLanguage)}: ${Utils.formatTime(filterStartMs)} - ${Utils.formatTime(filterEndMs)}", color = TextLight, fontSize = 12.sp)
                             Slider(
                                 value = filterStartMs.toFloat(),
                                 onValueChange = { filterStartMs = it.toLong().coerceAtMost(filterEndMs - 500L) },
@@ -2309,7 +2314,7 @@ fun VideoEditorApp() {
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(containerColor = DeepViolet)
                             ) {
-                                Text("Filtreyi Ekle", color = Color.White)
+                                Text(Strings.get("add_filter_btn", appLanguage), color = Color.White)
                             }
 
                             appliedFilters.forEachIndexed { index, item ->
@@ -2363,11 +2368,11 @@ fun VideoEditorApp() {
                                 onSuccess = { outUri ->
                                     exportProgress = null
                                     exportSuccessUri = outUri
-                                    Toast.makeText(context, "Video Başarıyla Dışa Aktarıldı!", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, Strings.get("success", appLanguage), Toast.LENGTH_LONG).show()
                                 },
                                 onError = { err ->
                                     exportProgress = null
-                                    exportError = err.localizedMessage ?: "Dışa aktarım hatası meydana geldi."
+                                        exportError = err.localizedMessage ?: Strings.get("error", appLanguage)
                                 }
                             )
                         },
@@ -2385,7 +2390,7 @@ fun VideoEditorApp() {
                             .testTag("export_button")
                     ) {
                         Text(
-                            text = "Yeni Videoyu Kaydet / Aktar",
+                                text = Strings.get("export_video", appLanguage),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = SpaceObsidian,
@@ -2424,7 +2429,7 @@ fun VideoEditorApp() {
                     Spacer(modifier = Modifier.height(20.dp))
 
                     Text(
-                        text = "Videonuz Hazırlanıyor...",
+                        text = Strings.get("exporting", appLanguage),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextLight,
@@ -2434,7 +2439,7 @@ fun VideoEditorApp() {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "İşlem Tamamlanıyor: %${((exportProgress ?: 0f) * 100).toInt()}",
+                        text = "${Strings.get("completing", appLanguage)}: %${((exportProgress ?: 0f) * 100).toInt()}",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = NeonCyan,
@@ -2444,7 +2449,7 @@ fun VideoEditorApp() {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        text = "Kırpma ve ses ayarlarınız uygulanıyor. Lütfen uygulamayı kapatmayın.",
+                        text = Strings.get("export_desc", appLanguage),
                         fontSize = 11.sp,
                         color = TextMuted,
                         textAlign = TextAlign.Center
@@ -2487,7 +2492,7 @@ fun VideoEditorApp() {
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "Başarıyla Dışa Aktarıldı!",
+                        text = Strings.get("success", appLanguage),
                         fontSize = 20.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = TextLight,
@@ -2497,7 +2502,7 @@ fun VideoEditorApp() {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Düzenlenen yeni video başarıyla galerinize ('Movies/VideoEditor' dizini) ve cihaz hafızasına kaydedildi.",
+                        text = Strings.get("success_desc", appLanguage),
                         fontSize = 13.sp,
                         color = TextMuted,
                         textAlign = TextAlign.Center
@@ -2514,7 +2519,7 @@ fun VideoEditorApp() {
                                 }
                                 context.startActivity(intent)
                             } catch (e: Exception) {
-                                Toast.makeText(context, "Videonuzu oynatacak bir uygulama bulunamadı.", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "...", Toast.LENGTH_SHORT).show()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
@@ -2522,7 +2527,7 @@ fun VideoEditorApp() {
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "Videoyu Oynat",
+                            text = Strings.get("play_video", appLanguage),
                             color = SpaceObsidian,
                             fontWeight = FontWeight.Bold
                         )
@@ -2538,9 +2543,9 @@ fun VideoEditorApp() {
                                     putExtra(Intent.EXTRA_STREAM, exportSuccessUri)
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                 }
-                                context.startActivity(Intent.createChooser(shareIntent, "Videoyu Paylaş"))
+                                context.startActivity(Intent.createChooser(shareIntent, Strings.get("share_video", appLanguage)))
                             } catch (e: Exception) {
-                                Toast.makeText(context, "Paylaşım başlatılamadı.", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "...", Toast.LENGTH_SHORT).show()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DeepViolet),
@@ -2548,7 +2553,7 @@ fun VideoEditorApp() {
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "Videoyu Paylaş",
+                            text = Strings.get("share_video", appLanguage),
                             color = Color.White,
                             fontWeight = FontWeight.Bold
                         )
@@ -2563,10 +2568,60 @@ fun VideoEditorApp() {
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "Kapat",
+                            text = Strings.get("close", appLanguage),
                             color = TextLight,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    // Settings Dialog
+    if (showSettings) {
+        Dialog(onDismissRequest = { showSettings = false }) {
+            Surface(
+                modifier = Modifier.width(300.dp).clip(RoundedCornerShape(24.dp)),
+                color = SurfaceDarkBlue
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text(
+                        text = Strings.get("settings", appLanguage),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NeonCyan
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Language, "", tint = TextLight)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(text = Strings.get("languages", appLanguage), color = TextLight)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { appLanguage = AppLanguage.EN },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = if (appLanguage == AppLanguage.EN) NeonCyan else Color.DarkGray)
+                        ) {
+                            Text("English", color = if (appLanguage == AppLanguage.EN) SpaceObsidian else Color.White)
+                        }
+                        Button(
+                            onClick = { appLanguage = AppLanguage.TR },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = if (appLanguage == AppLanguage.TR) NeonCyan else Color.DarkGray)
+                        ) {
+                            Text("Türkçe", color = if (appLanguage == AppLanguage.TR) SpaceObsidian else Color.White)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = { showSettings = false },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = DeepViolet)
+                    ) {
+                        Text(Strings.get("close", appLanguage), color = Color.White)
                     }
                 }
             }
@@ -2606,7 +2661,7 @@ fun VideoEditorApp() {
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "Aktarım Başarısız!",
+                        text = Strings.get("error", appLanguage),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextLight,

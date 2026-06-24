@@ -196,7 +196,11 @@ object VideoExporter {
                     for (sub in subtitles) {
                         val startInTrim = sub.startMs - startMs; val endInTrim = sub.endMs - startMs
                         if (presentationTimeMs in startInTrim..endInTrim) {
-                            val paint = android.graphics.Paint().apply { color = android.graphics.Color.YELLOW; textSize = height * 0.05f; isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER; setShadowLayer(6f, 3f, 3f, android.graphics.Color.BLACK) }
+                            val paint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.parseColor(sub.colorHex)
+                                textSize = height * 0.05f; isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER
+                                setShadowLayer(6f, 3f, 3f, android.graphics.Color.BLACK)
+                            }
                             val x = width / 2f; val y = height * 0.88f
                             var currentY = y; for (line in sub.text.split("\n")) { canvas.drawText(line, x, currentY, paint); currentY += paint.textSize + 12f }
                         }
